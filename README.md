@@ -1,20 +1,38 @@
 # rock-money
 
-A self-hosted personal finance tracker. Today it's a thin wrapper around the
-[Plaid](https://plaid.com) API for linking bank accounts and pulling
-transactions into a local PostgreSQL database. The goal is to grow into a
-full replacement for Rocket Money, Copilot, Monarch, and similar
-subscription-priced finance apps — fully owned, fully local, no monthly fee
-and no third party holding onto your data.
+A self-hosted personal finance tracker. Wraps the [Plaid](https://plaid.com)
+API for linking bank accounts and pulling transactions into a local PostgreSQL
+database. The goal is to grow into a full replacement for Rocket Money, Copilot,
+Monarch, and similar subscription-priced finance apps — fully owned, fully
+local, no monthly fee and no third party holding onto your data.
 
 ## What works today
 
+**Ingestion**
 - Link bank, brokerage, and credit card accounts via Plaid Link (sandbox or
   production).
 - Incremental transaction sync using Plaid's `/transactions/sync` cursor API.
   Crash-safe: cursors are persisted per-page so a re-run never re-fetches.
 - Idempotent upserts — running `sync` repeatedly is safe.
 - Cascading deletes: removing an item cleans up its accounts and transactions.
+
+**Web dashboard** (`uv run python main.py web`)
+- Account summary with transaction counts and debit/credit totals.
+- Transactions page with full-text search (merchant, name, note), month/
+  category/account filters, and saved search views.
+- Transaction detail page: override category, add a note, add/remove tags.
+- Spend-by-category bar chart and month-over-month cash-flow report.
+- Budget tracking: set per-category monthly limits and track progress.
+
+**Category rules engine**
+- Define rules that match transactions by merchant name, display name, or
+  category (substring match, case-insensitive).
+- Rules auto-apply after every sync — new transactions are categorized without
+  manual work.
+- Dry-run mode lets you preview which transactions a rule would match before
+  saving.
+- Manual category overrides on individual transactions are never clobbered by
+  rules.
 
 ## Setup
 
@@ -48,6 +66,12 @@ uv run python main.py sync
 
 # See what's connected and when it was last synced
 uv run python main.py list-items
+
+# Launch the web dashboard (default: http://localhost:5000)
+uv run python main.py web
+
+# Enable verbose logging
+uv run python main.py web --debug
 ```
 
 Plaid sandbox test credentials: username `user_good`, password `pass_good`,
@@ -55,72 +79,65 @@ phone OTP `123456`.
 
 ## Data model
 
-Four tables in PostgreSQL:
+Eight tables in PostgreSQL:
 
 - `items` — one row per linked institution (holds the Plaid access token)
 - `accounts` — bank/credit/investment accounts within an item
 - `transactions` — individual transactions
 - `sync_cursors` — Plaid sync cursor per item
+- `category_overrides` — user-set category for a transaction (overrides Plaid)
+- `category_rules` — pattern-based auto-categorization rules
+- `transaction_notes` — free-text notes attached to transactions
+- `transaction_tags` — many-to-many tags on transactions
+- `saved_views` — named transaction filter presets
+- `budgets` — monthly spending limits per category
 
 Amount convention follows Plaid's raw values: **positive = debit (money out),
 negative = credit (money in)**.
 
-## Roadmap
+## Category resolution
 
-The current CLI is just the ingestion layer. The plan is to build a complete
-finance management system on top of it.
+Effective category priority (highest wins):
 
-### Near term — analytics on top of the existing data
-
-- [ ] **Income & spend categorization** — auto-classify transactions using
-      Plaid's `personal_finance_category` plus user-defined rules and
-      overrides.
-- [ ] **Recurring transaction detection** — surface subscriptions, bills,
-      and paychecks so the obvious "this charge again" cases don't need
-      manual tagging.
-- [ ] **Monthly cash-flow reports** — income vs. spend by category, month
-      over month, with a CLI summary.
-- [ ] **Budgets** — per-category monthly budgets with progress and rollover
-      rules. Alerting when a category is on pace to overshoot.
-
-### Mid term — frontend
-
-- [ ] **Web dashboard** — accounts overview, net worth chart, recent
-      transactions, spend by category, budget progress. Local-first, runs
-      next to the database.
-- [ ] **Transaction editor** — split transactions, recategorize, add notes
-      and tags, hide internal transfers from spend totals.
-- [ ] **Search & filters** — across all transactions, with saved views.
-
-### Longer term — feature parity with Rocket Money / Copilot / Monarch
-
-- [ ] **Net worth tracking** — historical balances per account, including
-      manually-tracked assets (real estate, vehicles, private investments).
-- [ ] **Goals** — savings targets, debt paydown projections.
-- [ ] **Subscription management** — flag subscriptions, surface price
-      changes, estimate annual cost.
-- [ ] **Bill negotiation reminders** — flag candidates, but no third-party
-      "we'll negotiate for a cut of the savings" middleman.
-- [ ] **Investment account drill-down** — holdings, cost basis, allocation.
-- [ ] **Multi-user / household mode** — shared accounts with per-user
-      visibility rules.
-- [ ] **Mobile-friendly UI or companion app**.
-- [ ] **Import from CSV / OFX / QIF** — for accounts Plaid can't reach, and
-      for historical data backfill.
-- [ ] **Export everything** — your data, your database, easy to leave.
+1. Manual override set by the user on the transaction detail page
+2. Rule match (highest-priority rule wins; rules auto-apply after sync)
+3. Plaid's `personal_finance_category`
 
 ## Architecture
 
-Five modules with a clear data flow:
-`main.py` → `link_server.py` or `sync.py` → `plaid_client.py` + `db.py`.
+`main.py` → `link_server.py` or `sync.py` → `plaid_client.py` + `db.py`  
+`main.py` → `web_server.py` → `analytics.py` + `db.py`
 
 - `plaid_client.py` — wraps the plaid-python SDK; `sync_transactions()` is a
   generator over cursor pages.
 - `db.py` — raw psycopg2 with a `ThreadedConnectionPool`; all writes are
   upserts.
-- `sync.py` — drives the cursor loop and persists progress per-page.
+- `sync.py` — drives the cursor loop, persists progress per-page, and
+  auto-applies category rules after each full sync.
 - `link_server.py` — short-lived Flask server that hosts Plaid Link during
   the connect flow, then shuts itself down.
+- `analytics.py` — all query and report logic: transaction search, spend
+  summaries, budget status, category rule matching.
+- `web_server.py` — persistent Flask dashboard; routes map to analytics
+  queries and template renders.
 - `main.py` — argparse CLI entrypoint.
 
 See [CLAUDE.md](CLAUDE.md) for deeper notes on each module.
+
+## Roadmap
+
+### Near term
+
+- [ ] **Recurring transaction detection** — surface subscriptions, bills, and
+      paychecks automatically.
+- [ ] **Net worth tracking** — historical balances per account.
+
+### Longer term
+
+- [ ] **Goals** — savings targets, debt paydown projections.
+- [ ] **Subscription management** — flag subscriptions, surface price changes.
+- [ ] **Investment account drill-down** — holdings, cost basis, allocation.
+- [ ] **Multi-user / household mode** — shared accounts with per-user visibility.
+- [ ] **Import from CSV / OFX / QIF** — for accounts Plaid can't reach and
+      historical backfill.
+- [ ] **Export everything** — your data, your database, easy to leave.
