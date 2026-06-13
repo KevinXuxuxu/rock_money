@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+
+{% block content %}
+<h2>Accounts</h2>
+
+<section>
+  <div class="card">
+    {% if accounts %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Institution</th>
+            <th>Type</th>
+            <th>Mask</th>
+            <th class="num">Transactions</th>
+            <th class="num">Total Debits</th>
+            <th class="num">Total Credits</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in accounts %}
+          <tr>
+            <td>
+              <div style="font-weight:500">{{ a.name }}</div>
+              {% if a.official_name and a.official_name != a.name %}
+              <div class="muted" style="font-size:12px">{{ a.official_name }}</div>
+              {% endif %}
+            </td>
+            <td>{{ a.institution_name or '—' }}</td>
+            <td>{{ a.subtype or a.type }}</td>
+            <td class="mono">{{ a.mask or '—' }}</td>
+            <td class="num">{{ a.txn_count }}</td>
+            <td class="num debit">{{ a.total_debits|money }}</td>
+            <td class="num credit">{{ a.total_credits|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty">No accounts. Run <code>link</code> to connect a bank account.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

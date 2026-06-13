@@ -310,6 +310,13 @@ def cmd_budget_alert(args):
         )
 
 
+def cmd_web(args):
+    """Start the persistent web dashboard."""
+    import web_server
+
+    web_server.run(port=args.port)
+
+
 def cmd_rule_apply(args):
     """Apply rules to all un-categorized transactions."""
     import analytics
@@ -443,6 +450,13 @@ def main():
         "--dry-run", action="store_true", help="Preview matches without saving"
     )
     p_rapply.set_defaults(func=cmd_rule_apply)
+
+    # web
+    p_web = sub.add_parser("web", help="Start the web dashboard")
+    p_web.add_argument(
+        "--port", type=int, default=8123, help="Port to listen on (default: 5000)"
+    )
+    p_web.set_defaults(func=cmd_web)
 
     # budget-set
     p_bset = sub.add_parser("budget-set", help="Set a monthly budget for a category")

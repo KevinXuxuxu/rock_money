@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h2>Dashboard <span style="font-weight:400;color:var(--muted);font-size:16px">{{ month }}</span></h2>
+
+<!-- Summary cards -->
+<section>
+  <div class="cards">
+    <div class="card">
+      <div class="stat-label">Accounts</div>
+      <div class="stat-val">{{ accounts|length }}</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Spent this month</div>
+      <div class="stat-val debit">{{ total_spend|money }}</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Net this month</div>
+      <div class="stat-val {{ 'credit' if current_net >= 0 else 'debit' }}">
+        {{ current_net|money }}
+      </div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Recent transactions</div>
+      <div class="stat-val">{{ recent_txns|length }}</div>
+    </div>
+  </div>
+</section>
+
+<!-- Spend by category chart -->
+<section>
+  <div class="row">
+    <div class="card">
+      <h3>Spend by category — {{ month }}</h3>
+      {% if spend %}
+        <div class="bar-chart">
+          {% for row in spend[:10] %}
+          <div class="bar-row">
+            <span class="bar-label" title="{{ row.category or 'Uncategorized' }}">
+              {{ (row.category or 'Uncategorized')[:26] }}
+            </span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:{{ row.pct|int }}%"></div>
+            </div>
+            <span class="bar-amount">{{ row.total_spend|money }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">No spending data for {{ month }}.</div>
+      {% endif %}
+    </div>
+
+    <!-- 6-month trend -->
+    <div class="card">
+      <h3>6-month summary</h3>
+      {% if summary %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Month</th>
+              <th class="num">Income</th>
+              <th class="num">Spend</th>
+              <th class="num">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in summary %}
+            <tr>
+              <td>{{ r.month|string|truncate(7, True, '') }}</td>
+              <td class="num credit">{{ r.income|money }}</td>
+              <td class="num debit">{{ r.spend|money }}</td>
+              <td class="num {{ 'credit' if r.net >= 0 else 'debit' }}">{{ r.net|money }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty">No data yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<!-- Recent transactions -->
+<section>
+  <div class="card">
+    <h3>Recent transactions</h3>
+    {% if recent_txns %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="num">Amount</th>
+            <th>Merchant</th>
+            <th>Account</th>
+            <th>Category</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in recent_txns %}
+          <tr>
+            <td class="muted">{{ t.date }}</td>
+            <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
+            <td>{{ t.merchant_name or t.name or '—' }}</td>
+            <td class="muted">{{ t.account_name or '—' }}</td>
+            <td class="muted">{{ t.effective_category or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:14px">
+      <a href="/transactions" style="color:var(--blue);font-size:13px">View all transactions →</a>
+    </div>
+    {% else %}
+      <div class="empty">No transactions. Run <code>sync</code> to fetch data.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

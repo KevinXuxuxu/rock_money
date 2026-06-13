@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+<h2>Reports</h2>
+
+<!-- Month selector -->
+<section>
+  <form class="filters" method="get" action="/reports">
+    <label>
+      Month (for spend &amp; budgets)
+      <input type="month" name="month" value="{{ month }}">
+    </label>
+    <label>
+      Months of history
+      <input type="number" name="months" value="{{ months }}" min="1" max="60" style="width:80px">
+    </label>
+    <button type="submit">Update</button>
+  </form>
+</section>
+
+<!-- Monthly cash flow -->
+<section>
+  <div class="card">
+    <h3>Monthly cash flow</h3>
+    {% if summary %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th class="num">Income</th>
+            <th class="num">Spend</th>
+            <th class="num">Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in summary|reverse %}
+          <tr>
+            <td>{{ r.month|string|truncate(7, True, '') }}</td>
+            <td class="num credit">{{ r.income|money }}</td>
+            <td class="num debit">{{ r.spend|money }}</td>
+            <td class="num {{ 'credit' if r.net >= 0 else 'debit' }}">{{ r.net|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty">No transaction data found.</div>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Spend by category + Budgets side by side -->
+<div class="row">
+  <!-- Spend by category chart -->
+  <section>
+    <div class="card">
+      <h3>Spend by category — {{ month }}</h3>
+      {% if spend %}
+        <div class="bar-chart">
+          {% for row in spend[:12] %}
+          <div class="bar-row">
+            <span class="bar-label" title="{{ row.category or 'Uncategorized' }}">
+              {{ (row.category or 'Uncategorized')[:26] }}
+            </span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:{{ row.pct|int }}%"></div>
+            </div>
+            <span class="bar-amount">{{ row.total_spend|money }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">No spending data for {{ month }}.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- Budget status -->
+  <section>
+    <div class="card">
+      <h3>Budget status — {{ month }}</h3>
+      {% if budgets %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th class="num">Limit</th>
+              <th class="num">Spent</th>
+              <th>Used</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in budgets %}
+            {% set cls = 'over-budget' if b.pct_used >= 100 else ('near-budget' if b.pct_used >= 80 else 'on-track') %}
+            {% set bar_cls = 'over-budget' if b.pct_used >= 100 else ('near-budget' if b.pct_used >= 80 else '') %}
+            <tr>
+              <td>{{ b.category }}</td>
+              <td class="num">{{ b.monthly_limit|money }}</td>
+              <td class="num {{ cls }}">{{ b.actual_spend|money }}</td>
+              <td>
+                <div class="pct-cell">
+                  <div class="bar-track" style="width:80px;flex:none">
+                    <div class="bar-fill {{ bar_cls }}"
+                         style="width:{{ [b.pct_used, 100]|min|int }}%;
+                                background: {{ '#c0392b' if b.pct_used >= 100 else ('#f59e0b' if b.pct_used >= 80 else 'var(--blue)') }}">
+                    </div>
+                  </div>
+                  <span class="{{ cls }}">{{ b.pct_used|round(1) }}%</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <div class="empty">No budgets set. Use <code>budget-set</code> to create one.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

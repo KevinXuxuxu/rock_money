@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Transactions{% endblock %}
+
+{% block content %}
+<h2>Transactions</h2>
+
+<section>
+  <form class="filters" method="get" action="/transactions">
+    <label>
+      Month
+      <input type="month" name="month" value="{{ filters.month }}" placeholder="YYYY-MM">
+    </label>
+    <label>
+      Account
+      <select name="account">
+        <option value="">All accounts</option>
+        {% for a in accounts %}
+        <option value="{{ a.account_id }}" {% if filters.account == a.account_id %}selected{% endif %}>
+          {{ a.name }}{% if a.mask %} ···{{ a.mask }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      Category
+      <input type="text" name="category" value="{{ filters.category }}" placeholder="e.g. GROCERIES">
+    </label>
+    <label>
+      Limit
+      <input type="number" name="limit" value="{{ filters.limit }}" min="10" max="500" style="width:80px">
+    </label>
+    <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:2px">
+      <input type="checkbox" name="pending" value="1" {% if filters.pending %}checked{% endif %}>
+      Pending
+    </label>
+    <button type="submit">Filter</button>
+    <a href="/transactions"><button type="button" class="btn-reset">Reset</button></a>
+  </form>
+</section>
+
+<section>
+  <div class="card">
+    {% if txns %}
+    <div style="color:var(--muted);font-size:13px;margin-bottom:14px">
+      Showing {{ txns|length }} transaction{{ 's' if txns|length != 1 }}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="num">Amount</th>
+            <th>Merchant</th>
+            <th>Account</th>
+            <th>Category</th>
+            <th>ID</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in txns %}
+          <tr>
+            <td class="muted">{{ t.date }}</td>
+            <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
+            <td>{{ t.merchant_name or t.name or '—' }}</td>
+            <td class="muted">
+              {{ t.account_name or '—' }}
+              {% if t.account_mask %}<span class="mono">···{{ t.account_mask }}</span>{% endif %}
+            </td>
+            <td>{{ t.effective_category or '—' }}</td>
+            <td class="mono">{{ t.transaction_id }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty">No transactions found for the selected filters.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
