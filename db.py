@@ -219,6 +219,87 @@ def upsert_transactions(txns: list[dict]) -> int:
             return cur.rowcount
 
 
+# ── Category overrides ──────────────────────────────────────────────────────────
+
+
+def upsert_category_override(transaction_id: str, category: str) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO category_overrides (transaction_id, category)
+                VALUES (%s, %s)
+                ON CONFLICT (transaction_id) DO UPDATE SET
+                    category = EXCLUDED.category
+                """,
+                (transaction_id, category),
+            )
+
+
+def delete_category_override(transaction_id: str) -> bool:
+    """Return True if a row was deleted."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM category_overrides WHERE transaction_id = %s",
+                (transaction_id,),
+            )
+            return cur.rowcount > 0
+
+
+def get_category_override(transaction_id: str) -> str | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT category FROM category_overrides WHERE transaction_id = %s",
+                (transaction_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+# ── Category rules ──────────────────────────────────────────────────────────────
+
+
+def add_category_rule(
+    match_pattern: str,
+    match_field: str,
+    category: str,
+    priority: int = 0,
+) -> int:
+    """Insert a rule and return its id."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO category_rules (match_pattern, match_field, category, priority)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (match_pattern, match_field, category, priority),
+            )
+            return cur.fetchone()[0]
+
+
+def delete_category_rule(rule_id: int) -> bool:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM category_rules WHERE id = %s",
+                (rule_id,),
+            )
+            return cur.rowcount > 0
+
+
+def list_category_rules() -> list[dict]:
+    with get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM category_rules ORDER BY priority DESC, id")
+            return [dict(row) for row in cur.fetchall()]
+
+
 def delete_transactions(transaction_ids: list[str]) -> int:
     if not transaction_ids:
         return 0

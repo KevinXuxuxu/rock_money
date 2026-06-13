@@ -54,3 +54,22 @@ CREATE INDEX IF NOT EXISTS idx_transactions_account_id ON transactions(account_i
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date DESC);
 CREATE INDEX IF NOT EXISTS idx_transactions_pending ON transactions(pending);
 CREATE INDEX IF NOT EXISTS idx_accounts_item_id ON accounts(item_id);
+
+-- ── User category overrides and rules ────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS category_overrides (
+    transaction_id TEXT PRIMARY KEY REFERENCES transactions(transaction_id) ON DELETE CASCADE,
+    category       TEXT NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS category_rules (
+    id            SERIAL PRIMARY KEY,
+    match_pattern TEXT NOT NULL,
+    match_field   TEXT NOT NULL DEFAULT 'merchant_name',
+    category      TEXT NOT NULL,
+    priority      INT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_category_overrides_category ON category_overrides(category);

@@ -92,8 +92,10 @@ def cmd_list_txns(args):
         return
 
     # Column widths
-    print(f"{'Date':<12} {'Amount':>10} {'Merchant':<32} {'Account':<20} {'Category'}")
-    print("-" * 110)
+    print(
+        f"{'Date':<12} {'Amount':>10} {'Merchant':<28} {'Account':<18} {'Category':<22} {'Txn ID'}"
+    )
+    print("-" * 130)
     for t in txns:
         date_str = str(t["date"]) if t["date"] else "—"
         amount = float(t["amount"])
@@ -101,11 +103,14 @@ def cmd_list_txns(args):
         amt_str = f"${abs(amount):,.2f}"
         if amount < 0:
             amt_str = f"-{amt_str}"  # credit
-        merchant = (t["merchant_name"] or t["name"] or "—")[:31]
-        acct = (t["account_name"] or "—")[:19]
-        cat = t.get("personal_finance_category") or "—"
+        merchant = (t["merchant_name"] or t["name"] or "—")[:27]
+        acct = (t["account_name"] or "—")[:17]
+        cat = (t.get("effective_category") or "—")[:21]
+        txn_id = t["transaction_id"] or "—"
 
-        print(f"{date_str:<12} {amt_str:>10} {merchant:<32} {acct:<20} {cat}")
+        print(
+            f"{date_str:<12} {amt_str:>10} {merchant:<28} {acct:<18} {cat:<22} {txn_id}"
+        )
 
 
 def cmd_report_spend(args):
@@ -153,6 +158,86 @@ def cmd_report_monthly(args):
         spend = float(r["spend"]) if r["spend"] else 0
         net = float(r["net"]) if r["net"] else 0
         print(f"{month:<10} ${income:>11,.2f} ${spend:>11,.2f} ${net:>11,.2f}")
+
+
+def cmd_categorize(args):
+    """Set a user override category on a transaction."""
+    import db
+
+    db.upsert_category_override(args.transaction_id, args.category)
+    print(f"Transaction {args.transaction_id} → {args.category}")
+
+
+def cmd_uncategorize(args):
+    """Remove a user override category from a transaction."""
+    import db
+
+    deleted = db.delete_category_override(args.transaction_id)
+    if deleted:
+        print(f"Override removed for {args.transaction_id}.")
+    else:
+        print(f"No override found for {args.transaction_id}.")
+
+
+def cmd_rule_add(args):
+    """Add a category rule."""
+    import db
+
+    rule_id = db.add_category_rule(
+        match_pattern=args.match,
+        match_field=args.field,
+        category=args.category,
+        priority=args.priority,
+    )
+    print(
+        f"Rule #{rule_id} added: If {args.field} contains '{args.match}' → {args.category}"
+    )
+
+
+def cmd_rule_list(args):
+    """List all category rules."""
+    import db
+
+    rules = db.list_category_rules()
+    if not rules:
+        print("No rules defined. Use `rule-add` to create one.")
+        return
+
+    print(f"{'ID':<6} {'Field':<22} {'Pattern':<30} {'Category':<24} {'Pri':>3}")
+    print("-" * 88)
+    for r in rules:
+        print(
+            f"{r['id']:<6} {r['match_field']:<22} {r['match_pattern']:<30} "
+            f"{r['category']:<24} {r['priority']:>3}"
+        )
+
+
+def cmd_rule_remove(args):
+    """Delete a category rule."""
+    import db
+
+    deleted = db.delete_category_rule(args.rule_id)
+    if deleted:
+        print(f"Rule #{args.rule_id} deleted.")
+    else:
+        print(f"No rule found with id {args.rule_id}.")
+
+
+def cmd_rule_apply(args):
+    """Apply rules to all un-categorized transactions."""
+    import analytics
+
+    results = analytics.apply_rules(dry_run=args.dry_run)
+    if not results:
+        print("No matching rules found.")
+        return
+
+    label = "Would match" if args.dry_run else "Matched"
+    print(f"\n{label} {len(results)} transaction(s):")
+    for r in results:
+        print(
+            f"  {r['transaction_id'][:16]}  {r['old_category'] or '—':<24} → {r['new_category']}"
+        )
 
 
 def main():
@@ -217,6 +302,60 @@ def main():
         "--pending", action="store_true", help="Include pending transactions"
     )
     p_txns.set_defaults(func=cmd_list_txns)
+
+    # categorize
+    p_cat = sub.add_parser(
+        "categorize", help="Override Plaid category on a transaction"
+    )
+    p_cat.add_argument("transaction_id", type=str, help="Transaction ID")
+    p_cat.add_argument("category", type=str, help="New category name")
+    p_cat.set_defaults(func=cmd_categorize)
+
+    # uncategorize
+    p_uncat = sub.add_parser("uncategorize", help="Remove a category override")
+    p_uncat.add_argument("transaction_id", type=str, help="Transaction ID")
+    p_uncat.set_defaults(func=cmd_uncategorize)
+
+    # rule-add
+    p_radd = sub.add_parser("rule-add", help="Add a category rule")
+    p_radd.add_argument(
+        "--match", type=str, required=True, help="Text to match (case-insensitive)"
+    )
+    p_radd.add_argument(
+        "--field",
+        type=str,
+        default="merchant_name",
+        choices=["merchant_name", "name", "personal_finance_category"],
+        help="Field to match against (default: merchant_name)",
+    )
+    p_radd.add_argument(
+        "--category",
+        type=str,
+        required=True,
+        help="Category to assign when rule matches",
+    )
+    p_radd.add_argument(
+        "--priority", type=int, default=0, help="Higher priority rules run first"
+    )
+    p_radd.set_defaults(func=cmd_rule_add)
+
+    # rule-list
+    p_rlist = sub.add_parser("rule-list", help="List all category rules")
+    p_rlist.set_defaults(func=cmd_rule_list)
+
+    # rule-remove
+    p_rrem = sub.add_parser("rule-remove", help="Delete a category rule")
+    p_rrem.add_argument("rule_id", type=int, help="Rule ID (from rule-list)")
+    p_rrem.set_defaults(func=cmd_rule_remove)
+
+    # rule-apply
+    p_rapply = sub.add_parser(
+        "rule-apply", help="Apply rules to uncategorized transactions"
+    )
+    p_rapply.add_argument(
+        "--dry-run", action="store_true", help="Preview matches without saving"
+    )
+    p_rapply.set_defaults(func=cmd_rule_apply)
 
     # list-items
     p_list = sub.add_parser("list-items", help="List all linked institutions")

@@ -33,7 +33,7 @@ def get_transactions(
         conditions.append("t.account_id = %s")
         params.append(account_id)
     if category:
-        conditions.append("t.personal_finance_category = %s")
+        conditions.append("COALESCE(co.category, t.personal_finance_category) = %s")
         params.append(category)
     if month:
         conditions.append("date_trunc('month', t.date) = %s::date")
@@ -47,9 +47,11 @@ def get_transactions(
                t.payment_channel, t.pending, t.personal_finance_category,
                t.personal_finance_category_confidence, t.category,
                a.name AS account_name, a.mask AS account_mask,
-               a.type AS account_type, a.subtype AS account_subtype
+               a.type AS account_type, a.subtype AS account_subtype,
+               COALESCE(co.category, t.personal_finance_category) AS effective_category
         FROM transactions t
         JOIN accounts a ON a.account_id = t.account_id
+        LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
         WHERE {where}
         ORDER BY t.date DESC, t.name
         LIMIT %s
@@ -146,3 +148,78 @@ def get_accounts() -> list[dict]:
                 ORDER BY i.institution_name, a.name
             """)
             return [dict(row) for row in cur.fetchall()]
+
+
+# ── Category resolution ──────────────────────────────────────────────────────
+
+
+def effective_category(transaction_id: str) -> str | None:
+    """Return the user's override category, or None if not set.
+    Caller should fall back to Plaid's personal_finance_category, then 'Uncategorized'.
+    """
+    return db.get_category_override(transaction_id)
+
+
+def resolve_category(transaction: dict) -> str:
+    """
+    Resolve the best category for a transaction dict.
+    Priority: user override > rule match > Plaid category > 'Uncategorized'.
+    """
+    txn_id = transaction["transaction_id"]
+    override = effective_category(txn_id)
+    if override:
+        return override
+    return transaction.get("personal_finance_category") or "Uncategorized"
+
+
+def apply_rules(dry_run: bool = False) -> list[dict]:
+    """
+    Apply all category rules to transactions that don't already have an override.
+    Returns a list of {transaction_id, old_category, new_category} for matches.
+
+    When dry_run=True, report matches but don't persist them.
+    """
+    rules = db.list_category_rules()
+    if not rules:
+        return []
+
+    # Get all non-overridden transactions
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT t.transaction_id, t.name, t.merchant_name,
+                       t.personal_finance_category
+                FROM transactions t
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM category_overrides co
+                    WHERE co.transaction_id = t.transaction_id
+                )
+            """)
+            transactions = [dict(row) for row in cur.fetchall()]
+
+    results = []
+    for txn in transactions:
+        for rule in rules:
+            field_value = txn.get(rule["match_field"]) or ""
+            if _rule_matches(field_value, rule["match_pattern"]):
+                results.append(
+                    {
+                        "transaction_id": txn["transaction_id"],
+                        "old_category": txn.get("personal_finance_category"),
+                        "new_category": rule["category"],
+                        "rule_id": rule["id"],
+                        "matched_on": field_value,
+                    }
+                )
+                if not dry_run:
+                    db.upsert_category_override(txn["transaction_id"], rule["category"])
+                break  # first matching rule wins (sorted by priority desc)
+
+    return results
+
+
+def _rule_matches(field_value: str, pattern: str) -> bool:
+    """Case-insensitive substring match."""
+    return pattern.lower() in field_value.lower()

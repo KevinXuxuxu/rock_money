@@ -1,5 +1,7 @@
 """Tests for analytics.py — all DB interaction is mocked via the mock_db fixture."""
 
+from unittest.mock import patch
+
 import analytics
 from tests.conftest import make_txn, make_account
 
@@ -53,8 +55,50 @@ class TestGetTransactions:
 
         analytics.get_transactions(category="INCOME")
 
+        sql = mock_db.execute.call_args[0][0]
         params = mock_db.execute.call_args[0][1]
         assert "INCOME" in params
+        # Uses effective category (overrides included)
+        assert "COALESCE(co.category, t.personal_finance_category)" in sql
+
+    def test_left_joins_category_overrides(self, mock_db):
+        """Verify the query joins category_overrides for effective_category."""
+        mock_db.fetchall.return_value = []
+
+        analytics.get_transactions()
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "LEFT JOIN category_overrides co" in sql
+        assert (
+            "COALESCE(co.category, t.personal_finance_category) AS effective_category"
+            in sql
+        )
+
+    def test_returns_effective_category_field(self, mock_db):
+        """When an override exists, effective_category reflects it."""
+        mock_db.fetchall.return_value = [
+            make_txn(
+                transaction_id="t1",
+                personal_finance_category="GROCERIES",
+                effective_category="Custom Grocery",
+            ),
+        ]
+
+        result = analytics.get_transactions()
+        assert result[0]["effective_category"] == "Custom Grocery"
+
+    def test_effective_category_falls_back_to_plaid(self, mock_db):
+        """When no override, effective_category equals plaid category."""
+        mock_db.fetchall.return_value = [
+            make_txn(
+                transaction_id="t1",
+                personal_finance_category="TRANSPORTATION",
+                effective_category="TRANSPORTATION",
+            ),
+        ]
+
+        result = analytics.get_transactions()
+        assert result[0]["effective_category"] == "TRANSPORTATION"
 
     def test_filters_by_month(self, mock_db):
         mock_db.fetchall.return_value = []
@@ -176,3 +220,50 @@ class TestMonthlySummary:
         assert "WHEN amount < 0 THEN -amount" in sql
         # Spend: sum debits (amount > 0)
         assert "WHEN amount > 0 THEN  amount" in sql
+
+
+# ── Phase 3: Category resolution ─────────────────────────────────────────────
+
+
+class TestRuleMatching:
+    """Phase 3: _rule_matches() — pure logic, no DB."""
+
+    def test_case_insensitive_match(self):
+        assert analytics._rule_matches("Netflix", "netflix")
+
+    def test_substring_match(self):
+        assert analytics._rule_matches("Netflix.com", "netflix")
+
+    def test_no_match(self):
+        assert not analytics._rule_matches("Spotify", "netflix")
+
+    def test_empty_field(self):
+        assert not analytics._rule_matches("", "netflix")
+
+    def test_empty_pattern(self):
+        assert analytics._rule_matches("Anything", "")
+
+
+class TestResolveCategory:
+    """Phase 3: resolve_category()"""
+
+    def test_returns_override_when_set(self):
+        txn = make_txn(transaction_id="txn_1", personal_finance_category="GROCERIES")
+        with patch("analytics.effective_category", return_value="My Custom"):
+            result = analytics.resolve_category(txn)
+        assert result == "My Custom"
+
+    def test_falls_back_to_plaid(self):
+        txn = make_txn(
+            transaction_id="txn_2", personal_finance_category="TRANSPORTATION"
+        )
+        with patch("analytics.effective_category", return_value=None):
+            result = analytics.resolve_category(txn)
+        assert result == "TRANSPORTATION"
+
+    def test_falls_back_to_uncategorized(self):
+        txn = make_txn(transaction_id="txn_3")
+        txn["personal_finance_category"] = None
+        with patch("analytics.effective_category", return_value=None):
+            result = analytics.resolve_category(txn)
+        assert result == "Uncategorized"
