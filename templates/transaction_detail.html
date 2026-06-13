@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ txn.merchant_name or txn.name }}{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:16px">
+  <a href="javascript:history.back()" style="color:var(--muted);font-size:14px">← Back</a>
+</div>
+
+<h2>{{ txn.merchant_name or txn.name }}</h2>
+<div class="muted" style="margin-top:-12px;margin-bottom:24px;font-size:13px">{{ txn.transaction_id }}</div>
+
+<!-- Info -->
+<section>
+  <div class="card">
+    <h3>Details</h3>
+    <div class="detail-grid">
+      <div class="detail-field">
+        <label>Date</label>
+        <div class="value">{{ txn.date }}</div>
+      </div>
+      <div class="detail-field">
+        <label>Amount</label>
+        <div class="value {{ txn.amount|sign_class }}">{{ txn.amount|fmt_amount }}</div>
+      </div>
+      <div class="detail-field">
+        <label>Account</label>
+        <div class="value">{{ txn.account_name or '—' }}{% if txn.account_mask %} ···{{ txn.account_mask }}{% endif %}</div>
+      </div>
+      <div class="detail-field">
+        <label>Institution</label>
+        <div class="value">{{ txn.institution_name or '—' }}</div>
+      </div>
+      <div class="detail-field">
+        <label>Payment channel</label>
+        <div class="value">{{ txn.payment_channel or '—' }}</div>
+      </div>
+      <div class="detail-field">
+        <label>Plaid category</label>
+        <div class="value muted">{{ txn.personal_finance_category or '—' }}</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Category override -->
+<section>
+  <div class="card">
+    <h3>Category</h3>
+    <p style="margin-bottom:12px;font-size:13px;color:var(--muted)">
+      Effective: <strong style="color:var(--text)">{{ txn.effective_category or '—' }}</strong>
+    </p>
+    <form class="filters" method="post" action="/transactions/{{ txn.transaction_id }}/category">
+      <label>
+        Override (leave empty to use Plaid's)
+        <input type="text" name="category" value="{{ txn.override_category or '' }}" placeholder="e.g. Subscriptions" style="min-width:220px">
+      </label>
+      <button type="submit">Save</button>
+      {% if txn.override_category %}
+      <button type="submit" name="category" value="" class="btn-reset">Clear override</button>
+      {% endif %}
+    </form>
+  </div>
+</section>
+
+<!-- Note -->
+<section>
+  <div class="card">
+    <h3>Note</h3>
+    <form method="post" action="/transactions/{{ txn.transaction_id }}/note">
+      <textarea name="note" rows="3"
+                style="width:100%;border:1px solid var(--border);border-radius:8px;padding:10px;font-size:14px;font-family:inherit;resize:vertical;margin-bottom:10px"
+                placeholder="Add a personal note…">{{ txn.note or '' }}</textarea>
+      <div style="display:flex;gap:8px">
+        <button type="submit" style="background:var(--blue);color:white;border:none;border-radius:8px;padding:8px 16px;font-size:14px;cursor:pointer">Save note</button>
+        {% if txn.note %}
+        <button type="submit" name="note" value=""
+                style="background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:8px 16px;font-size:14px;cursor:pointer">
+          Clear
+        </button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</section>
+
+<!-- Tags -->
+<section>
+  <div class="card">
+    <h3>Tags</h3>
+    <div style="margin-bottom:14px">
+      {% if txn.tags %}
+        {% for tag in txn.tags %}
+        <form method="post" action="/transactions/{{ txn.transaction_id }}/tags/remove" style="display:inline">
+          <input type="hidden" name="tag" value="{{ tag }}">
+          <button type="submit" class="tag-chip">{{ tag }} ×</button>
+        </form>
+        {% endfor %}
+      {% else %}
+        <span class="muted" style="font-size:13px">No tags yet.</span>
+      {% endif %}
+    </div>
+    <form method="post" action="/transactions/{{ txn.transaction_id }}/tags/add"
+          style="display:flex;gap:8px;align-items:center">
+      <input type="text" name="tag" placeholder="Add tag…"
+             style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:14px;min-width:160px">
+      <button type="submit"
+              style="background:var(--blue);color:white;border:none;border-radius:8px;padding:8px 14px;font-size:14px;cursor:pointer">
+        Add
+      </button>
+    </form>
+  </div>
+</section>
+{% endblock %}

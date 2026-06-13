@@ -13,6 +13,7 @@ def get_transactions(
     category: str | None = None,
     month: str | None = None,
     pending: bool = False,
+    q: str | None = None,
 ) -> list[dict]:
     """
     Return recent transactions with account info, newest first.
@@ -38,6 +39,12 @@ def get_transactions(
     if month:
         conditions.append("date_trunc('month', t.date) = %s::date")
         params.append(f"{month}-01")
+    if q:
+        conditions.append(
+            "(t.name ILIKE %s OR t.merchant_name ILIKE %s OR tn.note ILIKE %s)"
+        )
+        like = f"%{q}%"
+        params.extend([like, like, like])
 
     where = " AND ".join(conditions)
 
@@ -48,10 +55,12 @@ def get_transactions(
                t.personal_finance_category_confidence, t.category,
                a.name AS account_name, a.mask AS account_mask,
                a.type AS account_type, a.subtype AS account_subtype,
-               COALESCE(co.category, t.personal_finance_category) AS effective_category
+               COALESCE(co.category, t.personal_finance_category) AS effective_category,
+               tn.note
         FROM transactions t
         JOIN accounts a ON a.account_id = t.account_id
         LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+        LEFT JOIN transaction_notes tn ON tn.transaction_id = t.transaction_id
         WHERE {where}
         ORDER BY t.date DESC, t.name
         LIMIT %s
@@ -126,6 +135,53 @@ def monthly_summary(months: int = 12) -> list[dict]:
                 (months,),
             )
             return [dict(row) for row in cur.fetchall()]
+
+
+def get_categories() -> list[str]:
+    """Return all distinct effective categories (override > Plaid), sorted."""
+    with db.get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT DISTINCT COALESCE(co.category, t.personal_finance_category) AS cat
+                FROM transactions t
+                LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                WHERE COALESCE(co.category, t.personal_finance_category) IS NOT NULL
+                  AND t.pending = FALSE
+                ORDER BY cat
+            """)
+            return [row[0] for row in cur.fetchall()]
+
+
+def get_transaction_detail(transaction_id: str) -> dict | None:
+    """Return a single transaction with note and tags, or None if not found."""
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT t.*,
+                       a.name AS account_name, a.mask AS account_mask,
+                       a.type AS account_type, a.subtype AS account_subtype,
+                       i.institution_name,
+                       COALESCE(co.category, t.personal_finance_category) AS effective_category,
+                       co.category AS override_category,
+                       tn.note
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                JOIN items i ON i.item_id = a.item_id
+                LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                LEFT JOIN transaction_notes tn ON tn.transaction_id = t.transaction_id
+                WHERE t.transaction_id = %s
+                """,
+                (transaction_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            result = dict(row)
+    result["tags"] = db.get_transaction_tags(transaction_id)
+    return result
 
 
 def budget_status(month: str) -> list[dict]:

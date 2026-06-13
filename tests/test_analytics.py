@@ -383,6 +383,105 @@ class TestBudgetAlert:
         assert result == []
 
 
+# ── Phase 7: Search & detail ──────────────────────────────────────────────────
+
+
+class TestGetCategories:
+    """Phase 7: get_categories()"""
+
+    def test_returns_sorted_distinct_categories(self, mock_db):
+        mock_db.fetchall.return_value = [
+            ("DINING",),
+            ("GROCERIES",),
+            ("TRANSPORTATION",),
+        ]
+        result = analytics.get_categories()
+        assert result == ["DINING", "GROCERIES", "TRANSPORTATION"]
+
+    def test_uses_coalesce_for_effective_category(self, mock_db):
+        mock_db.fetchall.return_value = []
+        analytics.get_categories()
+        sql = mock_db.execute.call_args[0][0]
+        assert "COALESCE(co.category, t.personal_finance_category)" in sql
+        assert "LEFT JOIN category_overrides co" in sql
+
+
+class TestSearchTransactions:
+    """Phase 7: get_transactions(q=...) — full-text search."""
+
+    def test_q_adds_ilike_condition(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.get_transactions(q="netflix")
+
+        sql = mock_db.execute.call_args[0][0]
+        params = mock_db.execute.call_args[0][1]
+        assert "ILIKE" in sql
+        assert any("netflix" in str(p) for p in params)
+
+    def test_q_searches_name_and_merchant_and_note(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.get_transactions(q="coffee")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "t.name ILIKE" in sql
+        assert "t.merchant_name ILIKE" in sql
+        assert "tn.note ILIKE" in sql
+
+    def test_joins_transaction_notes(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.get_transactions()
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "LEFT JOIN transaction_notes tn" in sql
+
+    def test_note_field_in_select(self, mock_db):
+        mock_db.fetchall.return_value = [
+            make_txn(note="business lunch"),
+        ]
+
+        result = analytics.get_transactions()
+        assert result[0]["note"] == "business lunch"
+
+    def test_no_q_no_ilike(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.get_transactions()
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "ILIKE" not in sql
+
+
+class TestGetTransactionDetail:
+    """Phase 7: get_transaction_detail()"""
+
+    def test_returns_none_when_not_found(self, mock_db):
+        mock_db.fetchone.return_value = None
+
+        with patch("db.get_transaction_tags", return_value=[]):
+            result = analytics.get_transaction_detail("txn_missing")
+
+        assert result is None
+
+    def test_returns_detail_with_tags(self, mock_db):
+        mock_db.fetchone.return_value = {
+            **make_txn(transaction_id="txn_1"),
+            "institution_name": "Chase",
+            "override_category": None,
+            "effective_category": "GROCERIES",
+            "note": "weekly shop",
+        }
+
+        with patch("db.get_transaction_tags", return_value=["groceries", "weekly"]):
+            result = analytics.get_transaction_detail("txn_1")
+
+        assert result["transaction_id"] == "txn_1"
+        assert result["tags"] == ["groceries", "weekly"]
+        assert result["note"] == "weekly shop"
+
+
 class TestResolveCategory:
     """Phase 3: resolve_category()"""
 

@@ -1,4 +1,4 @@
-"""Tests for db.py Phase 3 additions — category overrides and rules."""
+"""Tests for db.py — category overrides, rules, notes, tags, views."""
 
 import db
 
@@ -85,3 +85,91 @@ class TestCategoryRules:
         # Verify SQL orders by priority desc
         sql = mock_db.execute.call_args[0][0]
         assert "ORDER BY priority DESC" in sql
+
+
+class TestTransactionNotes:
+    """Phase 7: upsert/delete/get transaction notes."""
+
+    def test_upsert_note(self, mock_db):
+        db.upsert_transaction_note("txn_1", "Business expense")
+        sql = mock_db.execute.call_args[0][0]
+        params = mock_db.execute.call_args[0][1]
+        assert "INSERT INTO transaction_notes" in sql
+        assert "ON CONFLICT" in sql
+        assert params == ("txn_1", "Business expense")
+
+    def test_delete_note_returns_true(self, mock_db):
+        mock_db.rowcount = 1
+        assert db.delete_transaction_note("txn_1") is True
+
+    def test_delete_note_returns_false(self, mock_db):
+        mock_db.rowcount = 0
+        assert db.delete_transaction_note("txn_x") is False
+
+    def test_get_note_found(self, mock_db):
+        mock_db.fetchone.return_value = ("My note",)
+        assert db.get_transaction_note("txn_1") == "My note"
+
+    def test_get_note_not_found(self, mock_db):
+        mock_db.fetchone.return_value = None
+        assert db.get_transaction_note("txn_1") is None
+
+
+class TestTransactionTags:
+    """Phase 7: add/remove/get transaction tags."""
+
+    def test_add_tag(self, mock_db):
+        db.add_transaction_tag("txn_1", "business")
+        sql = mock_db.execute.call_args[0][0]
+        params = mock_db.execute.call_args[0][1]
+        assert "INSERT INTO transaction_tags" in sql
+        assert "ON CONFLICT DO NOTHING" in sql
+        assert params == ("txn_1", "business")
+
+    def test_remove_tag_returns_true(self, mock_db):
+        mock_db.rowcount = 1
+        assert db.remove_transaction_tag("txn_1", "business") is True
+
+    def test_remove_tag_returns_false(self, mock_db):
+        mock_db.rowcount = 0
+        assert db.remove_transaction_tag("txn_1", "missing") is False
+
+    def test_get_tags(self, mock_db):
+        mock_db.fetchall.return_value = [("business",), ("travel",)]
+        tags = db.get_transaction_tags("txn_1")
+        assert tags == ["business", "travel"]
+
+    def test_get_tags_empty(self, mock_db):
+        mock_db.fetchall.return_value = []
+        assert db.get_transaction_tags("txn_1") == []
+
+
+class TestSavedViews:
+    """Phase 7: upsert/delete/list saved views."""
+
+    def test_upsert_view(self, mock_db):
+        db.upsert_view("My Search", {"q": "netflix", "month": ""})
+        sql = mock_db.execute.call_args[0][0]
+        assert "INSERT INTO saved_views" in sql
+        assert "ON CONFLICT" in sql
+
+    def test_delete_view_returns_true(self, mock_db):
+        mock_db.rowcount = 1
+        assert db.delete_view("My Search") is True
+
+    def test_delete_view_returns_false(self, mock_db):
+        mock_db.rowcount = 0
+        assert db.delete_view("Missing") is False
+
+    def test_list_views(self, mock_db):
+        mock_db.fetchall.return_value = [
+            {
+                "id": 1,
+                "name": "Netflix",
+                "filters": {"q": "netflix"},
+                "created_at": None,
+            },
+        ]
+        views = db.list_views()
+        assert len(views) == 1
+        assert views[0]["name"] == "Netflix"

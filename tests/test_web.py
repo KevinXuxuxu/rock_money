@@ -164,6 +164,152 @@ class TestTransactionsPage:
         assert b"My Custom" in resp.data
 
 
+class TestSearchPage:
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_returns_200(self, mock_txns, mock_accts, mock_cats, mock_views, client):
+        mock_txns.return_value = []
+        mock_accts.return_value = []
+        mock_cats.return_value = ["GROCERIES", "DINING"]
+        mock_views.return_value = []
+        resp = client.get("/search")
+        assert resp.status_code == 200
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_q_passed_to_get_transactions(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_txns.return_value = []
+        mock_accts.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        client.get("/search?q=netflix")
+
+        assert mock_txns.call_args.kwargs["q"] == "netflix"
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_shows_result_merchant(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_txns.return_value = [
+            make_txn(merchant_name="Starbucks", effective_category="COFFEE")
+        ]
+        mock_accts.return_value = []
+        mock_cats.return_value = ["COFFEE"]
+        mock_views.return_value = []
+
+        resp = client.get("/search?q=starbucks")
+        assert b"Starbucks" in resp.data
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_no_query_shows_no_results(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_accts.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        resp = client.get("/search")
+        mock_txns.assert_not_called()
+        assert resp.status_code == 200
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    def test_shows_saved_views(self, mock_accts, mock_cats, mock_views, client):
+        mock_accts.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = [
+            {
+                "name": "Netflix",
+                "filters": {"q": "netflix"},
+                "query_string": "q=netflix",
+            },
+        ]
+
+        resp = client.get("/search")
+        assert b"Netflix" in resp.data
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_category_dropdown_populated(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_txns.return_value = []
+        mock_accts.return_value = []
+        mock_cats.return_value = ["DINING", "GROCERIES", "TRANSPORTATION"]
+        mock_views.return_value = []
+
+        resp = client.get("/search")
+        assert b"GROCERIES" in resp.data
+        assert b"TRANSPORTATION" in resp.data
+
+
+class TestTransactionDetailPage:
+    @patch("db.get_transaction_tags")
+    @patch("analytics.get_transaction_detail")
+    def test_returns_200(self, mock_detail, mock_tags, client):
+        mock_detail.return_value = {
+            **make_txn(transaction_id="txn_1"),
+            "institution_name": "Chase",
+            "override_category": None,
+            "effective_category": "GROCERIES",
+            "note": None,
+            "tags": [],
+        }
+        resp = client.get("/transactions/txn_1")
+        assert resp.status_code == 200
+
+    @patch("analytics.get_transaction_detail")
+    def test_returns_404_when_not_found(self, mock_detail, client):
+        mock_detail.return_value = None
+        resp = client.get("/transactions/txn_missing")
+        assert resp.status_code == 404
+
+    @patch("db.get_transaction_tags")
+    @patch("analytics.get_transaction_detail")
+    def test_shows_note(self, mock_detail, mock_tags, client):
+        mock_detail.return_value = {
+            **make_txn(transaction_id="txn_1"),
+            "institution_name": "Chase",
+            "override_category": None,
+            "effective_category": "GROCERIES",
+            "note": "business dinner",
+            "tags": [],
+        }
+        resp = client.get("/transactions/txn_1")
+        assert b"business dinner" in resp.data
+
+    @patch("db.get_transaction_tags")
+    @patch("analytics.get_transaction_detail")
+    def test_shows_tags(self, mock_detail, mock_tags, client):
+        mock_detail.return_value = {
+            **make_txn(transaction_id="txn_1"),
+            "institution_name": "Chase",
+            "override_category": None,
+            "effective_category": "GROCERIES",
+            "note": None,
+            "tags": ["travel", "business"],
+        }
+        resp = client.get("/transactions/txn_1")
+        assert b"travel" in resp.data
+        assert b"business" in resp.data
+
+
 class TestReportsPage:
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")

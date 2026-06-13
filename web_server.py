@@ -1,10 +1,12 @@
 """Persistent Flask web dashboard for rock_money."""
 
 from datetime import datetime
+from urllib.parse import urlencode
 
-from flask import Flask, render_template, request
+from flask import Flask, redirect, render_template, request, url_for
 
 import analytics
+import db
 
 app = Flask(__name__)
 
@@ -110,6 +112,112 @@ def reports_page():
         month=month,
         months=months,
     )
+
+
+@app.get("/search")
+def search_page():
+    q = request.args.get("q", "")
+    month = request.args.get("month") or None
+    category = request.args.get("category") or None
+    account_id = request.args.get("account") or None
+    limit = min(int(request.args.get("limit", 50)), 500)
+
+    txns = []
+    if q or month or category or account_id:
+        txns = analytics.get_transactions(
+            q=q or None,
+            month=month,
+            category=category,
+            account_id=account_id,
+            limit=limit,
+        )
+
+    accounts = analytics.get_accounts()
+    categories = analytics.get_categories()
+    views = db.list_views()
+    for v in views:
+        v["query_string"] = urlencode(
+            {k: val for k, val in v["filters"].items() if val}
+        )
+
+    return render_template(
+        "search.html",
+        txns=txns,
+        accounts=accounts,
+        categories=categories,
+        views=views,
+        filters={
+            "q": q,
+            "month": month or "",
+            "category": category or "",
+            "account": account_id or "",
+            "limit": limit,
+        },
+    )
+
+
+@app.post("/search/views")
+def save_view():
+    name = request.form.get("name", "").strip()
+    filters = {
+        "q": request.form.get("q", ""),
+        "month": request.form.get("month", ""),
+        "category": request.form.get("category", ""),
+        "account": request.form.get("account", ""),
+    }
+    if name:
+        db.upsert_view(name, filters)
+    active = {k: v for k, v in filters.items() if v}
+    return redirect(url_for("search_page", **active))
+
+
+@app.post("/search/views/<name>/delete")
+def delete_view(name):
+    db.delete_view(name)
+    return redirect(url_for("search_page"))
+
+
+@app.get("/transactions/<txn_id>")
+def transaction_detail(txn_id):
+    txn = analytics.get_transaction_detail(txn_id)
+    if not txn:
+        return "Transaction not found", 404
+    return render_template("transaction_detail.html", txn=txn)
+
+
+@app.post("/transactions/<txn_id>/note")
+def set_note(txn_id):
+    note = request.form.get("note", "").strip()
+    if note:
+        db.upsert_transaction_note(txn_id, note)
+    else:
+        db.delete_transaction_note(txn_id)
+    return redirect(url_for("transaction_detail", txn_id=txn_id))
+
+
+@app.post("/transactions/<txn_id>/tags/add")
+def add_tag(txn_id):
+    tag = request.form.get("tag", "").strip().lower()
+    if tag:
+        db.add_transaction_tag(txn_id, tag)
+    return redirect(url_for("transaction_detail", txn_id=txn_id))
+
+
+@app.post("/transactions/<txn_id>/tags/remove")
+def remove_tag(txn_id):
+    tag = request.form.get("tag", "").strip()
+    db.remove_transaction_tag(txn_id, tag)
+    return redirect(url_for("transaction_detail", txn_id=txn_id))
+
+
+@app.post("/transactions/<txn_id>/category")
+def set_category_web(txn_id):
+    category = request.form.get("category", "").strip()
+    if category:
+        db.upsert_category_override(txn_id, category)
+    else:
+        db.delete_category_override(txn_id)
+    return redirect(url_for("transaction_detail", txn_id=txn_id))
 
 
 def run(port: int = 5000) -> None:

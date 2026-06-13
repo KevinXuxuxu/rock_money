@@ -332,6 +332,109 @@ def delete_budget(category: str) -> bool:
             return cur.rowcount > 0
 
 
+# ── Transaction notes ──────────────────────────────────────────────────────────
+
+
+def upsert_transaction_note(transaction_id: str, note: str) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO transaction_notes (transaction_id, note)
+                VALUES (%s, %s)
+                ON CONFLICT (transaction_id) DO UPDATE SET
+                    note = EXCLUDED.note, updated_at = NOW()
+                """,
+                (transaction_id, note),
+            )
+
+
+def delete_transaction_note(transaction_id: str) -> bool:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM transaction_notes WHERE transaction_id = %s",
+                (transaction_id,),
+            )
+            return cur.rowcount > 0
+
+
+def get_transaction_note(transaction_id: str) -> str | None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT note FROM transaction_notes WHERE transaction_id = %s",
+                (transaction_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
+# ── Transaction tags ───────────────────────────────────────────────────────────
+
+
+def add_transaction_tag(transaction_id: str, tag: str) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO transaction_tags (transaction_id, tag)
+                VALUES (%s, %s) ON CONFLICT DO NOTHING
+                """,
+                (transaction_id, tag),
+            )
+
+
+def remove_transaction_tag(transaction_id: str, tag: str) -> bool:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM transaction_tags WHERE transaction_id = %s AND tag = %s",
+                (transaction_id, tag),
+            )
+            return cur.rowcount > 0
+
+
+def get_transaction_tags(transaction_id: str) -> list[str]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT tag FROM transaction_tags WHERE transaction_id = %s ORDER BY tag",
+                (transaction_id,),
+            )
+            return [row[0] for row in cur.fetchall()]
+
+
+# ── Saved views ────────────────────────────────────────────────────────────────
+
+
+def upsert_view(name: str, filters: dict) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO saved_views (name, filters)
+                VALUES (%s, %s)
+                ON CONFLICT (name) DO UPDATE SET filters = EXCLUDED.filters
+                """,
+                (name, psycopg2.extras.Json(filters)),
+            )
+
+
+def delete_view(name: str) -> bool:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM saved_views WHERE name = %s", (name,))
+            return cur.rowcount > 0
+
+
+def list_views() -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM saved_views ORDER BY name")
+            return [dict(row) for row in cur.fetchall()]
+
+
 def delete_transactions(transaction_ids: list[str]) -> int:
     if not transaction_ids:
         return 0

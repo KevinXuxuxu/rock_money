@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Search{% endblock %}
+
+{% block content %}
+<h2>Search Transactions</h2>
+
+<!-- Saved views -->
+{% if views %}
+<div style="margin-bottom:16px">
+  {% for v in views %}
+  <a class="chip" href="/search?{{ v.query_string }}">{{ v.name }}</a>
+  <form method="post" action="/search/views/{{ v.name }}/delete" style="display:inline">
+    <button type="submit" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:12px;padding:0 0 0 2px" title="Delete view">×</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Search form -->
+<form class="filters" method="get" action="/search">
+  <label>
+    Search
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="merchant, name, or note…" style="min-width:220px">
+  </label>
+  <label>
+    Month
+    <input type="month" name="month" value="{{ filters.month }}">
+  </label>
+  <label>
+    Category
+    <select name="category">
+      <option value="">All categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ cat }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    Account
+    <select name="account">
+      <option value="">All accounts</option>
+      {% for a in accounts %}
+      <option value="{{ a.account_id }}" {% if filters.account == a.account_id %}selected{% endif %}>
+        {{ a.name }}{% if a.mask %} ···{{ a.mask }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Search</button>
+  <a href="/search"><button type="button" class="btn-reset">Reset</button></a>
+</form>
+
+<!-- Save view (only shown when a filter is active) -->
+{% if filters.q or filters.month or filters.category or filters.account %}
+<form method="post" action="/search/views" style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
+  <input type="hidden" name="q"        value="{{ filters.q }}">
+  <input type="hidden" name="month"    value="{{ filters.month }}">
+  <input type="hidden" name="category" value="{{ filters.category }}">
+  <input type="hidden" name="account"  value="{{ filters.account }}">
+  <input type="text" name="name" placeholder="Save this search as…"
+         style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:14px;min-width:200px">
+  <button type="submit"
+          style="background:var(--card);color:var(--blue);border:1px solid var(--blue);border-radius:8px;padding:7px 14px;font-size:14px;cursor:pointer;white-space:nowrap">
+    Save view
+  </button>
+</form>
+{% endif %}
+
+<!-- Results -->
+<section>
+  <div class="card">
+    {% if txns %}
+    <div style="color:var(--muted);font-size:13px;margin-bottom:14px">
+      {{ txns|length }} result{{ 's' if txns|length != 1 }}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="num">Amount</th>
+            <th>Merchant</th>
+            <th>Account</th>
+            <th>Category</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in txns %}
+          <tr>
+            <td class="muted">{{ t.date }}</td>
+            <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
+            <td>
+              <a href="/transactions/{{ t.transaction_id }}" style="color:var(--blue)">
+                {{ t.merchant_name or t.name or '—' }}
+              </a>
+            </td>
+            <td class="muted">{{ t.account_name or '—' }}</td>
+            <td>{{ t.effective_category or '—' }}</td>
+            <td class="muted" style="font-size:13px">{{ t.note or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% elif filters.q or filters.month or filters.category or filters.account %}
+      <div class="empty">No transactions match your search.</div>
+    {% else %}
+      <div class="empty">Enter a search term or apply a filter to get started.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

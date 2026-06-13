@@ -61,7 +61,7 @@
           <tr>
             <td class="muted">{{ t.date }}</td>
             <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
-            <td>{{ t.merchant_name or t.name or '—' }}</td>
+            <td><a href="/transactions/{{ t.transaction_id }}" style="color:var(--blue)">{{ t.merchant_name or t.name or '—' }}</a></td>
             <td class="muted">
               {{ t.account_name or '—' }}
               {% if t.account_mask %}<span class="mono">···{{ t.account_mask }}</span>{% endif %}

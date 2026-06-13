@@ -82,3 +82,29 @@ CREATE TABLE IF NOT EXISTS budgets (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Transaction annotations ───────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS transaction_notes (
+    transaction_id TEXT PRIMARY KEY REFERENCES transactions(transaction_id) ON DELETE CASCADE,
+    note           TEXT NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS transaction_tags (
+    transaction_id TEXT NOT NULL REFERENCES transactions(transaction_id) ON DELETE CASCADE,
+    tag            TEXT NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (transaction_id, tag)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_tags_tag ON transaction_tags(tag);
+
+-- ── Saved search views ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS saved_views (
+    id         SERIAL PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    filters    JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

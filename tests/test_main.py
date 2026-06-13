@@ -159,6 +159,114 @@ class TestCliSmoke:
         assert "1,800.00" in out
 
 
+class TestPhase7Commands:
+    """Phase 7: note, tag-add, tag-remove, search, view-* commands."""
+
+    @patch("db.upsert_transaction_note")
+    def test_cmd_note_set(self, mock_upsert, capsys):
+        from argparse import Namespace
+
+        main.cmd_note(Namespace(transaction_id="txn_1", note="Business lunch"))
+        mock_upsert.assert_called_once_with("txn_1", "Business lunch")
+        assert "saved" in capsys.readouterr().out.lower()
+
+    @patch("db.delete_transaction_note")
+    def test_cmd_note_clear(self, mock_delete, capsys):
+        from argparse import Namespace
+
+        main.cmd_note(Namespace(transaction_id="txn_1", note=""))
+        mock_delete.assert_called_once_with("txn_1")
+        assert "cleared" in capsys.readouterr().out.lower()
+
+    @patch("db.add_transaction_tag")
+    def test_cmd_tag_add(self, mock_add, capsys):
+        from argparse import Namespace
+
+        main.cmd_tag_add(Namespace(transaction_id="txn_1", tag="Travel"))
+        mock_add.assert_called_once_with("txn_1", "travel")
+        assert "travel" in capsys.readouterr().out
+
+    @patch("db.remove_transaction_tag")
+    def test_cmd_tag_remove_found(self, mock_remove, capsys):
+        mock_remove.return_value = True
+        from argparse import Namespace
+
+        main.cmd_tag_remove(Namespace(transaction_id="txn_1", tag="travel"))
+        assert "removed" in capsys.readouterr().out
+
+    @patch("db.remove_transaction_tag")
+    def test_cmd_tag_remove_not_found(self, mock_remove, capsys):
+        mock_remove.return_value = False
+        from argparse import Namespace
+
+        main.cmd_tag_remove(Namespace(transaction_id="txn_1", tag="ghost"))
+        assert "not found" in capsys.readouterr().out
+
+    @patch("analytics.get_transactions")
+    def test_cmd_search_with_results(self, mock_get, capsys):
+        from tests.conftest import make_txn
+
+        mock_get.return_value = [make_txn(merchant_name="Netflix", amount=15.99)]
+        from argparse import Namespace
+
+        main.cmd_search(Namespace(query="netflix", month=None, category=None, limit=50))
+        out = capsys.readouterr().out
+        assert "Netflix" in out
+        assert mock_get.call_args.kwargs["q"] == "netflix"
+
+    @patch("analytics.get_transactions")
+    def test_cmd_search_no_results(self, mock_get, capsys):
+        mock_get.return_value = []
+        from argparse import Namespace
+
+        main.cmd_search(Namespace(query="xyzzy", month=None, category=None, limit=50))
+        assert "No transactions" in capsys.readouterr().out
+
+    @patch("db.upsert_view")
+    def test_cmd_view_save(self, mock_upsert, capsys):
+        from argparse import Namespace
+
+        main.cmd_view_save(
+            Namespace(name="My View", search="netflix", month="", category="")
+        )
+        mock_upsert.assert_called_once()
+        assert "saved" in capsys.readouterr().out.lower()
+
+    @patch("db.list_views")
+    def test_cmd_view_list_empty(self, mock_list, capsys):
+        mock_list.return_value = []
+        from argparse import Namespace
+
+        main.cmd_view_list(Namespace())
+        assert "No saved views" in capsys.readouterr().out
+
+    @patch("db.list_views")
+    def test_cmd_view_list_with_data(self, mock_list, capsys):
+        mock_list.return_value = [
+            {"name": "Netflix", "filters": {"q": "netflix", "month": ""}},
+        ]
+        from argparse import Namespace
+
+        main.cmd_view_list(Namespace())
+        assert "Netflix" in capsys.readouterr().out
+
+    @patch("db.delete_view")
+    def test_cmd_view_delete_found(self, mock_delete, capsys):
+        mock_delete.return_value = True
+        from argparse import Namespace
+
+        main.cmd_view_delete(Namespace(name="My View"))
+        assert "deleted" in capsys.readouterr().out
+
+    @patch("db.delete_view")
+    def test_cmd_view_delete_not_found(self, mock_delete, capsys):
+        mock_delete.return_value = False
+        from argparse import Namespace
+
+        main.cmd_view_delete(Namespace(name="Ghost"))
+        assert "No view" in capsys.readouterr().out
+
+
 class TestBudgetCommands:
     """Phase 4: budget-set, budget-list, budget-delete, budget-status, budget-alert"""
 

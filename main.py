@@ -85,6 +85,8 @@ def cmd_list_txns(args):
         kwargs["month"] = args.month
     if args.pending:
         kwargs["pending"] = True
+    if getattr(args, "search", None):
+        kwargs["q"] = args.search
 
     txns = analytics.get_transactions(**kwargs)
     if not txns:
@@ -310,6 +312,110 @@ def cmd_budget_alert(args):
         )
 
 
+def cmd_note(args):
+    """Set or clear a note on a transaction."""
+    import db
+
+    note = args.note.strip()
+    if note:
+        db.upsert_transaction_note(args.transaction_id, note)
+        print(f"Note saved for {args.transaction_id}.")
+    else:
+        db.delete_transaction_note(args.transaction_id)
+        print(f"Note cleared for {args.transaction_id}.")
+
+
+def cmd_tag_add(args):
+    """Add a tag to a transaction."""
+    import db
+
+    tag = args.tag.strip().lower()
+    db.add_transaction_tag(args.transaction_id, tag)
+    print(f"Tag '{tag}' added to {args.transaction_id}.")
+
+
+def cmd_tag_remove(args):
+    """Remove a tag from a transaction."""
+    import db
+
+    deleted = db.remove_transaction_tag(args.transaction_id, args.tag)
+    if deleted:
+        print(f"Tag '{args.tag}' removed from {args.transaction_id}.")
+    else:
+        print(f"Tag '{args.tag}' not found on {args.transaction_id}.")
+
+
+def cmd_search(args):
+    """Search transactions by text."""
+    import analytics
+
+    kwargs = {"limit": args.limit}
+    if args.query:
+        kwargs["q"] = args.query
+    if args.month:
+        kwargs["month"] = args.month
+    if args.category:
+        kwargs["category"] = args.category
+
+    txns = analytics.get_transactions(**kwargs)
+    if not txns:
+        print("No transactions found.")
+        return
+
+    print(f"{'Date':<12} {'Amount':>10} {'Merchant':<28} {'Category':<22} {'Note'}")
+    print("-" * 100)
+    for t in txns:
+        date_str = str(t["date"]) if t["date"] else "—"
+        amount = float(t["amount"])
+        amt_str = f"${abs(amount):,.2f}"
+        if amount < 0:
+            amt_str = f"-{amt_str}"
+        merchant = (t["merchant_name"] or t["name"] or "—")[:27]
+        cat = (t.get("effective_category") or "—")[:21]
+        note = (t.get("note") or "")[:20]
+        print(f"{date_str:<12} {amt_str:>10} {merchant:<28} {cat:<22} {note}")
+
+
+def cmd_view_save(args):
+    """Save a named search view."""
+    import db
+
+    filters = {}
+    if args.search:
+        filters["q"] = args.search
+    if args.month:
+        filters["month"] = args.month
+    if args.category:
+        filters["category"] = args.category
+    db.upsert_view(args.name, filters)
+    print(f"View '{args.name}' saved.")
+
+
+def cmd_view_list(args):
+    """List all saved search views."""
+    import db
+
+    views = db.list_views()
+    if not views:
+        print("No saved views. Use `view-save` to create one.")
+        return
+
+    for v in views:
+        parts = ", ".join(f"{k}={val}" for k, val in v["filters"].items() if val)
+        print(f"  {v['name']:<24} {parts}")
+
+
+def cmd_view_delete(args):
+    """Delete a saved search view."""
+    import db
+
+    deleted = db.delete_view(args.name)
+    if deleted:
+        print(f"View '{args.name}' deleted.")
+    else:
+        print(f"No view found named '{args.name}'.")
+
+
 def cmd_web(args):
     """Start the persistent web dashboard."""
     import web_server
@@ -395,6 +501,9 @@ def main():
     p_txns.add_argument(
         "--pending", action="store_true", help="Include pending transactions"
     )
+    p_txns.add_argument(
+        "--search", type=str, help="Full-text search (name, merchant, note)"
+    )
     p_txns.set_defaults(func=cmd_list_txns)
 
     # categorize
@@ -450,6 +559,51 @@ def main():
         "--dry-run", action="store_true", help="Preview matches without saving"
     )
     p_rapply.set_defaults(func=cmd_rule_apply)
+
+    # note
+    p_note = sub.add_parser("note", help="Set or clear a note on a transaction")
+    p_note.add_argument("transaction_id", type=str, help="Transaction ID")
+    p_note.add_argument("note", type=str, help="Note text (empty string to clear)")
+    p_note.set_defaults(func=cmd_note)
+
+    # tag-add
+    p_tadd = sub.add_parser("tag-add", help="Add a tag to a transaction")
+    p_tadd.add_argument("transaction_id", type=str, help="Transaction ID")
+    p_tadd.add_argument("tag", type=str, help="Tag to add")
+    p_tadd.set_defaults(func=cmd_tag_add)
+
+    # tag-remove
+    p_trem = sub.add_parser("tag-remove", help="Remove a tag from a transaction")
+    p_trem.add_argument("transaction_id", type=str, help="Transaction ID")
+    p_trem.add_argument("tag", type=str, help="Tag to remove")
+    p_trem.set_defaults(func=cmd_tag_remove)
+
+    # search
+    p_srch = sub.add_parser("search", help="Full-text search across transactions")
+    p_srch.add_argument("query", type=str, nargs="?", default="", help="Search text")
+    p_srch.add_argument("--month", type=str, help="Filter to month YYYY-MM")
+    p_srch.add_argument("--category", type=str, help="Filter by category")
+    p_srch.add_argument(
+        "--limit", type=int, default=50, help="Max results (default: 50)"
+    )
+    p_srch.set_defaults(func=cmd_search)
+
+    # view-save
+    p_vsave = sub.add_parser("view-save", help="Save a named search view")
+    p_vsave.add_argument("name", type=str, help="View name")
+    p_vsave.add_argument("--search", type=str, default="", help="Search text")
+    p_vsave.add_argument("--month", type=str, default="", help="Month YYYY-MM")
+    p_vsave.add_argument("--category", type=str, default="", help="Category")
+    p_vsave.set_defaults(func=cmd_view_save)
+
+    # view-list
+    p_vlist = sub.add_parser("view-list", help="List saved search views")
+    p_vlist.set_defaults(func=cmd_view_list)
+
+    # view-delete
+    p_vdel = sub.add_parser("view-delete", help="Delete a saved search view")
+    p_vdel.add_argument("name", type=str, help="View name")
+    p_vdel.set_defaults(func=cmd_view_delete)
 
     # web
     p_web = sub.add_parser("web", help="Start the web dashboard")
