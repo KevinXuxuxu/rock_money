@@ -77,10 +77,15 @@
             document.getElementById('link-btn').disabled = false;
           }
         },
-        onExit: (err) => {
+        onExit: (err, metadata) => {
+          console.log('Link onExit', {err, metadata});
           if (err) {
             document.getElementById('status').className = 'error';
-            document.getElementById('status').textContent = err.display_message || 'Link exited.';
+            document.getElementById('status').textContent =
+              err.error_code + ': ' + (err.display_message || err.error_message || 'Link exited.');
+          } else {
+            document.getElementById('status').textContent =
+              'Link closed (no error). metadata: ' + JSON.stringify(metadata || {});
           }
         },
       });

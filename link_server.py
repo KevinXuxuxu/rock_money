@@ -69,7 +69,7 @@ def run(port: int = 8765) -> None:
     webbrowser.open(local_url)
 
     server_thread = threading.Thread(
-        target=lambda: app.run(port=port, debug=False, use_reloader=False),
+        target=lambda: app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False),
         daemon=True,
     )
     server_thread.start()
