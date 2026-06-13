@@ -310,6 +310,147 @@ class TestTransactionDetailPage:
         assert b"business" in resp.data
 
 
+class TestRulesPage:
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_returns_200(self, mock_rules, mock_cats, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        resp = client.get("/rules")
+        assert resp.status_code == 200
+
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_shows_rules(self, mock_rules, mock_cats, client):
+        mock_rules.return_value = [
+            {
+                "id": 1,
+                "match_field": "merchant_name",
+                "match_pattern": "Netflix",
+                "category": "Subscriptions",
+                "priority": 10,
+            },
+        ]
+        mock_cats.return_value = []
+        resp = client.get("/rules")
+        assert b"Netflix" in resp.data
+        assert b"Subscriptions" in resp.data
+
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_empty_state(self, mock_rules, mock_cats, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        resp = client.get("/rules")
+        assert b"No saved rules" in resp.data
+
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_categories_populate_datalist(self, mock_rules, mock_cats, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = ["GROCERIES", "DINING"]
+        resp = client.get("/rules")
+        assert b"GROCERIES" in resp.data
+
+    @patch("db.add_category_rule")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_add_rule_redirects(self, mock_rules, mock_cats, mock_add, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_add.return_value = 5
+        resp = client.post(
+            "/rules",
+            data={
+                "match_pattern": "Netflix",
+                "match_field": "merchant_name",
+                "category": "Subscriptions",
+                "priority": "10",
+            },
+        )
+        assert resp.status_code == 302
+        mock_add.assert_called_once()
+
+    @patch("analytics.apply_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_apply_rules_redirects(self, mock_rules, mock_cats, mock_apply, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_apply.return_value = [{"transaction_id": "txn_1"}]
+        resp = client.post("/rules/apply", data={"dry_run": "0"})
+        assert resp.status_code == 302
+        mock_apply.assert_called_once_with(dry_run=False)
+
+    @patch("db.delete_category_rule")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_delete_rule_redirects(self, mock_rules, mock_cats, mock_delete, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_delete.return_value = True
+        resp = client.post("/rules/3/delete")
+        assert resp.status_code == 302
+        mock_delete.assert_called_once_with(3)
+
+    @patch("db.add_category_rule")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_add_rule_empty_pattern_not_saved(
+        self, mock_rules, mock_cats, mock_add, client
+    ):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        resp = client.post(
+            "/rules",
+            data={
+                "match_pattern": "",
+                "match_field": "merchant_name",
+                "category": "Subscriptions",
+                "priority": "0",
+            },
+        )
+        assert resp.status_code == 302
+        mock_add.assert_not_called()
+
+    @patch("db.add_category_rule")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_add_rule_empty_category_not_saved(
+        self, mock_rules, mock_cats, mock_add, client
+    ):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        resp = client.post(
+            "/rules",
+            data={
+                "match_pattern": "Netflix",
+                "match_field": "merchant_name",
+                "category": "",
+                "priority": "0",
+            },
+        )
+        assert resp.status_code == 302
+        mock_add.assert_not_called()
+
+    @patch("analytics.apply_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_dry_run_shows_match_count_in_flash(
+        self, mock_rules, mock_cats, mock_apply, client
+    ):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_apply.return_value = [
+            {"transaction_id": "txn_1"},
+            {"transaction_id": "txn_2"},
+        ]
+        with client.session_transaction() as sess:
+            sess["_fresh"] = True
+        resp = client.post("/rules/apply", data={"dry_run": "1"}, follow_redirects=True)
+        assert b"2" in resp.data
+
+
 class TestReportsPage:
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")

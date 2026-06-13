@@ -1,3 +1,4 @@
+import analytics
 import db
 from plaid_client import PlaidClient
 
@@ -77,3 +78,12 @@ def sync_all(verbose: bool = True) -> None:
             sync_item(item["item_id"], row[0], verbose=verbose)
         except Exception as exc:
             print(f"  ERROR: {exc}")
+
+    # Auto-apply rules to any newly synced transactions that don't yet have a category override.
+    rules = db.list_category_rules()
+    if rules:
+        if verbose:
+            print(f"\nApplying {len(rules)} rule(s) to new transactions...")
+        matched = analytics.apply_rules(dry_run=False)
+        if verbose and matched:
+            print(f"  Categorised {len(matched)} transaction(s) via rules.")

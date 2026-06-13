@@ -1,14 +1,19 @@
 """Persistent Flask web dashboard for rock_money."""
 
+import logging
+import os
 from datetime import datetime
 from urllib.parse import urlencode
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, flash, redirect, render_template, request, url_for
 
 import analytics
 import db
 
 app = Flask(__name__)
+app.secret_key = os.urandom(24)
+
+_log = logging.getLogger(__name__)
 
 
 @app.template_filter("money")
@@ -218,6 +223,67 @@ def set_category_web(txn_id):
     else:
         db.delete_category_override(txn_id)
     return redirect(url_for("transaction_detail", txn_id=txn_id))
+
+
+@app.get("/rules")
+def rules_page():
+    rules = db.list_category_rules()
+    categories = analytics.get_categories()
+    return render_template("rules.html", rules=rules, categories=categories)
+
+
+@app.post("/rules")
+def add_rule():
+    pattern = request.form.get("match_pattern", "").strip()
+    field = request.form.get("match_field", "merchant_name")
+    category = request.form.get("category", "").strip()
+    priority = int(request.form.get("priority", 0) or 0)
+    _log.info(
+        "add_rule: received pattern=%r field=%r category=%r priority=%r",
+        pattern,
+        field,
+        category,
+        priority,
+    )
+    if pattern and category:
+        rule_id = db.add_category_rule(
+            match_pattern=pattern,
+            match_field=field,
+            category=category,
+            priority=priority,
+        )
+        _log.info("add_rule: saved as rule #%d", rule_id)
+        flash(
+            f"Rule #{rule_id} added: {field} contains '{pattern}' → {category}",
+            "success",
+        )
+    else:
+        _log.warning(
+            "add_rule: NOT saved — pattern=%r category=%r (one or both empty)",
+            pattern,
+            category,
+        )
+        flash("Rule not saved: both pattern and category are required.", "error")
+    return redirect(url_for("rules_page"))
+
+
+@app.post("/rules/<int:rule_id>/delete")
+def delete_rule(rule_id):
+    db.delete_category_rule(rule_id)
+    flash(f"Rule #{rule_id} deleted.", "info")
+    return redirect(url_for("rules_page"))
+
+
+@app.post("/rules/apply")
+def apply_rules_web():
+    dry_run = request.form.get("dry_run") == "1"
+    results = analytics.apply_rules(dry_run=dry_run)
+    n = len(results)
+    if dry_run:
+        flash(f"Dry run: would match {n} transaction(s).", "info")
+    else:
+        flash(f"Applied rules: matched and categorised {n} transaction(s).", "success")
+    return redirect(url_for("rules_page"))
 
 
 def run(port: int = 5000) -> None:

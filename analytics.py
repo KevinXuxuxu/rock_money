@@ -3,7 +3,11 @@ Query functions for analytics, reports, and dashboards.
 All functions use the existing db.get_conn() pool and return lists of dicts.
 """
 
+import logging
+
 import db
+
+_log = logging.getLogger(__name__)
 
 
 def get_transactions(
@@ -272,36 +276,57 @@ def resolve_category(transaction: dict) -> str:
 
 def apply_rules(dry_run: bool = False) -> list[dict]:
     """
-    Apply all category rules to transactions that don't already have an override.
+    Apply all category rules to transactions.
+    Dry-run matches ALL transactions (including already-categorised ones) so the
+    user can verify a rule works before committing. Actual apply skips transactions
+    that already have a manual override.
     Returns a list of {transaction_id, old_category, new_category} for matches.
-
-    When dry_run=True, report matches but don't persist them.
     """
     rules = db.list_category_rules()
+    _log.info("apply_rules: %d rule(s), dry_run=%s", len(rules), dry_run)
     if not rules:
         return []
 
-    # Get all non-overridden transactions
     with db.get_conn() as conn:
         import psycopg2.extras
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("""
-                SELECT t.transaction_id, t.name, t.merchant_name,
-                       t.personal_finance_category
-                FROM transactions t
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM category_overrides co
-                    WHERE co.transaction_id = t.transaction_id
-                )
-            """)
+            if dry_run:
+                # Match against all transactions so the user can test the rule.
+                cur.execute("""
+                    SELECT t.transaction_id, t.name, t.merchant_name,
+                           t.personal_finance_category
+                    FROM transactions t
+                """)
+            else:
+                # Only categorise transactions without an existing manual override.
+                cur.execute("""
+                    SELECT t.transaction_id, t.name, t.merchant_name,
+                           t.personal_finance_category
+                    FROM transactions t
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM category_overrides co
+                        WHERE co.transaction_id = t.transaction_id
+                    )
+                """)
             transactions = [dict(row) for row in cur.fetchall()]
+
+    _log.info("apply_rules: %d transaction(s) to check", len(transactions))
 
     results = []
     for txn in transactions:
         for rule in rules:
-            field_value = txn.get(rule["match_field"]) or ""
-            if _rule_matches(field_value, rule["match_pattern"]):
+            field_value = _field_value(txn, rule["match_field"])
+            matched = _rule_matches(field_value, rule["match_pattern"])
+            _log.debug(
+                "txn %s | %s=%r | pattern=%r | match=%s",
+                txn["transaction_id"][:16],
+                rule["match_field"],
+                field_value[:60],
+                rule["match_pattern"],
+                matched,
+            )
+            if matched:
                 results.append(
                     {
                         "transaction_id": txn["transaction_id"],
@@ -315,7 +340,18 @@ def apply_rules(dry_run: bool = False) -> list[dict]:
                     db.upsert_category_override(txn["transaction_id"], rule["category"])
                 break  # first matching rule wins (sorted by priority desc)
 
+    _log.info("apply_rules: %d match(es)", len(results))
     return results
+
+
+def _field_value(txn: dict, match_field: str) -> str:
+    """
+    Return the value to match against for a given field name.
+    For merchant_name, fall back to name when NULL — matching what the UI displays.
+    """
+    if match_field == "merchant_name":
+        return txn.get("merchant_name") or txn.get("name") or ""
+    return txn.get(match_field) or ""
 
 
 def _rule_matches(field_value: str, pattern: str) -> bool:

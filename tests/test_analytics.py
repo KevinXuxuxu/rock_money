@@ -244,6 +244,28 @@ class TestRuleMatching:
         assert analytics._rule_matches("Anything", "")
 
 
+class TestFieldValue:
+    """_field_value falls back from merchant_name → name when merchant_name is NULL."""
+
+    def test_merchant_name_present(self):
+        txn = {"merchant_name": "Trader Joe's", "name": "TRADER JOES #123"}
+        assert analytics._field_value(txn, "merchant_name") == "Trader Joe's"
+
+    def test_merchant_name_null_falls_back_to_name(self):
+        txn = {"merchant_name": None, "name": "TRADER JOES #123"}
+        assert analytics._field_value(txn, "merchant_name") == "TRADER JOES #123"
+
+    def test_name_field_no_fallback(self):
+        txn = {"merchant_name": "Trader Joe's", "name": "TRADER JOES #123"}
+        assert analytics._field_value(txn, "name") == "TRADER JOES #123"
+
+    def test_personal_finance_category(self):
+        txn = {"personal_finance_category": "FOOD_AND_DRINK", "name": "x"}
+        assert (
+            analytics._field_value(txn, "personal_finance_category") == "FOOD_AND_DRINK"
+        )
+
+
 # ── Phase 4: Budget management ────────────────────────────────────────────────
 
 
@@ -505,3 +527,171 @@ class TestResolveCategory:
         with patch("analytics.effective_category", return_value=None):
             result = analytics.resolve_category(txn)
         assert result == "Uncategorized"
+
+
+# ── apply_rules ───────────────────────────────────────────────────────────────
+
+
+class TestApplyRules:
+    """
+    Tests for apply_rules():
+    - dry_run queries ALL transactions; actual apply skips already-overridden ones
+    - dry_run never writes overrides; actual apply does
+    - merchant_name NULL falls back to name during matching
+    - first matching rule wins (highest priority)
+    """
+
+    _RULE = {
+        "id": 1,
+        "match_field": "merchant_name",
+        "match_pattern": "Netflix",
+        "category": "Subscriptions",
+        "priority": 0,
+    }
+    _TXN_MATCH = {
+        "transaction_id": "txn_match",
+        "name": "NETFLIX.COM",
+        "merchant_name": "Netflix",
+        "personal_finance_category": "ENTERTAINMENT",
+    }
+    _TXN_NO_MATCH = {
+        "transaction_id": "txn_no_match",
+        "name": "SPOTIFY",
+        "merchant_name": "Spotify",
+        "personal_finance_category": "ENTERTAINMENT",
+    }
+
+    @patch("db.list_category_rules")
+    def test_returns_empty_when_no_rules(self, mock_rules):
+        mock_rules.return_value = []
+        assert analytics.apply_rules(dry_run=True) == []
+        assert analytics.apply_rules(dry_run=False) == []
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_dry_run_returns_matches_without_writing(
+        self, mock_rules, mock_upsert, mock_db
+    ):
+        mock_rules.return_value = [self._RULE]
+        mock_db.fetchall.return_value = [self._TXN_MATCH, self._TXN_NO_MATCH]
+
+        results = analytics.apply_rules(dry_run=True)
+
+        assert len(results) == 1
+        assert results[0]["transaction_id"] == "txn_match"
+        assert results[0]["new_category"] == "Subscriptions"
+        assert results[0]["matched_on"] == "Netflix"
+        mock_upsert.assert_not_called()
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_apply_writes_override_for_match(self, mock_rules, mock_upsert, mock_db):
+        mock_rules.return_value = [self._RULE]
+        mock_db.fetchall.return_value = [self._TXN_MATCH]
+
+        results = analytics.apply_rules(dry_run=False)
+
+        assert len(results) == 1
+        mock_upsert.assert_called_once_with("txn_match", "Subscriptions")
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_apply_does_not_write_for_non_match(self, mock_rules, mock_upsert, mock_db):
+        mock_rules.return_value = [self._RULE]
+        mock_db.fetchall.return_value = [self._TXN_NO_MATCH]
+
+        results = analytics.apply_rules(dry_run=False)
+
+        assert results == []
+        mock_upsert.assert_not_called()
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_dry_run_sql_has_no_exists_filter(self, mock_rules, mock_upsert, mock_db):
+        """dry_run must query ALL transactions, not just un-overridden ones."""
+        mock_rules.return_value = [self._RULE]
+        mock_db.fetchall.return_value = []
+
+        analytics.apply_rules(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "NOT EXISTS" not in sql
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_apply_sql_has_not_exists_filter(self, mock_rules, mock_upsert, mock_db):
+        """Actual apply must skip transactions that already have a manual override."""
+        mock_rules.return_value = [self._RULE]
+        mock_db.fetchall.return_value = []
+
+        analytics.apply_rules(dry_run=False)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "NOT EXISTS" in sql
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_merchant_name_null_falls_back_to_name(
+        self, mock_rules, mock_upsert, mock_db
+    ):
+        """merchant_name=NULL should match via name fallback, mirroring the UI display."""
+        mock_rules.return_value = [self._RULE]
+        txn = {
+            "transaction_id": "txn_null_merchant",
+            "name": "NETFLIX SUBSCRIPTION",
+            "merchant_name": None,
+            "personal_finance_category": "ENTERTAINMENT",
+        }
+        mock_db.fetchall.return_value = [txn]
+
+        results = analytics.apply_rules(dry_run=True)
+
+        assert len(results) == 1
+        assert results[0]["transaction_id"] == "txn_null_merchant"
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_first_matching_rule_wins(self, mock_rules, mock_upsert, mock_db):
+        """When multiple rules match a transaction, only the highest-priority one applies."""
+        rules = [
+            {**self._RULE, "id": 1, "category": "Subscriptions", "priority": 10},
+            {**self._RULE, "id": 2, "category": "Entertainment", "priority": 5},
+        ]
+        mock_rules.return_value = rules
+        mock_db.fetchall.return_value = [self._TXN_MATCH]
+
+        results = analytics.apply_rules(dry_run=True)
+
+        assert len(results) == 1
+        assert results[0]["new_category"] == "Subscriptions"
+        assert results[0]["rule_id"] == 1
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_multiple_transactions_each_matched_independently(
+        self, mock_rules, mock_upsert, mock_db
+    ):
+        rules = [
+            {
+                **self._RULE,
+                "id": 1,
+                "match_pattern": "Netflix",
+                "category": "Subscriptions",
+            },
+            {
+                "id": 2,
+                "match_field": "merchant_name",
+                "match_pattern": "Spotify",
+                "category": "Music",
+                "priority": 0,
+            },
+        ]
+        mock_rules.return_value = rules
+        mock_db.fetchall.return_value = [self._TXN_MATCH, self._TXN_NO_MATCH]
+
+        results = analytics.apply_rules(dry_run=False)
+
+        assert len(results) == 2
+        cats = {r["transaction_id"]: r["new_category"] for r in results}
+        assert cats["txn_match"] == "Subscriptions"
+        assert cats["txn_no_match"] == "Music"

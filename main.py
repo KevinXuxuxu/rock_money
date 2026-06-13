@@ -418,8 +418,13 @@ def cmd_view_delete(args):
 
 def cmd_web(args):
     """Start the persistent web dashboard."""
+    import logging
     import web_server
 
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     web_server.run(port=args.port)
 
 
@@ -609,6 +614,9 @@ def main():
     p_web = sub.add_parser("web", help="Start the web dashboard")
     p_web.add_argument(
         "--port", type=int, default=8123, help="Port to listen on (default: 5000)"
+    )
+    p_web.add_argument(
+        "--debug", action="store_true", help="Enable DEBUG logging (verbose)"
     )
     p_web.set_defaults(func=cmd_web)
 

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Rules{% endblock %}
+
+{% block content %}
+<h2>Category Rules</h2>
+
+<!-- Step 1: Add rule form -->
+<section>
+  <div class="card">
+    <h3>Step 1 — Define a rule</h3>
+    <form id="add-rule-form" class="filters" method="post" action="/rules">
+      <label>
+        Match pattern
+        <input type="text" name="match_pattern" required placeholder="e.g. Netflix">
+      </label>
+      <label>
+        Match field
+        <select name="match_field">
+          <option value="merchant_name">Merchant name (as shown in list)</option>
+          <option value="name">Raw transaction name</option>
+          <option value="personal_finance_category">Plaid category</option>
+        </select>
+      </label>
+      <label>
+        Assign category
+        <input type="text" name="category" required placeholder="e.g. Subscriptions"
+               list="category-list">
+        <datalist id="category-list">
+          {% for cat in categories %}
+          <option value="{{ cat }}">
+          {% endfor %}
+        </datalist>
+      </label>
+      <label>
+        Priority
+        <input type="number" name="priority" value="0" style="width:80px">
+      </label>
+      <button type="submit" id="add-rule-btn">Save rule</button>
+    </form>
+    <p class="muted" style="margin-top:10px;font-size:13px">
+      Match is case-insensitive substring. Higher priority rules run first.
+      Category can be any text — new categories are created automatically.
+    </p>
+  </div>
+</section>
+
+<!-- Step 2: Apply -->
+<section>
+  <div class="card">
+    <h3>Step 2 — Apply saved rules to transactions</h3>
+    <p class="muted" style="font-size:13px;margin-bottom:14px">
+      Rules must be saved (Step 1) before you can apply or test them.
+      There {{ 'is' if rules|length == 1 else 'are' }} currently
+      <strong>{{ rules|length }} saved rule{{ 's' if rules|length != 1 }}</strong>.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <form method="post" action="/rules/apply">
+        <input type="hidden" name="dry_run" value="0">
+        <button type="submit" {% if not rules %}disabled title="Save a rule first"{% endif %}
+                style="background:var(--green);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:14px;font-weight:500;cursor:pointer;opacity:{% if rules %}1{% else %}.4{% endif %}">
+          Apply rules to all transactions
+        </button>
+      </form>
+      <form method="post" action="/rules/apply">
+        <input type="hidden" name="dry_run" value="1">
+        <button type="submit" {% if not rules %}disabled title="Save a rule first"{% endif %}
+                class="btn-secondary"
+                style="border-radius:8px;padding:9px 18px;font-size:14px;font-weight:500;cursor:pointer;opacity:{% if rules %}1{% else %}.4{% endif %}">
+          Dry run (preview only)
+        </button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- Saved rules table -->
+<section>
+  <div class="card">
+    <h3>Saved rules ({{ rules|length }})</h3>
+    {% if rules %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Field</th>
+            <th>Pattern</th>
+            <th>→ Category</th>
+            <th class="num">Priority</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rules %}
+          <tr>
+            <td class="muted">#{{ r.id }}</td>
+            <td class="mono">{{ r.match_field }}</td>
+            <td>{{ r.match_pattern }}</td>
+            <td>{{ r.category }}</td>
+            <td class="num">{{ r.priority }}</td>
+            <td>
+              <form method="post" action="/rules/{{ r.id }}/delete"
+                    onsubmit="return confirm('Delete rule #{{ r.id }}?')">
+                <button type="submit" class="btn-icon" title="Delete">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty">No saved rules yet. Fill in Step 1 above and click "Save rule".</div>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

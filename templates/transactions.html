@@ -25,16 +25,18 @@
       Category
       <input type="text" name="category" value="{{ filters.category }}" placeholder="e.g. GROCERIES">
     </label>
-    <label>
-      Limit
-      <input type="number" name="limit" value="{{ filters.limit }}" min="10" max="500" style="width:80px">
-    </label>
-    <label style="flex-direction:row;align-items:center;gap:6px;padding-bottom:2px">
-      <input type="checkbox" name="pending" value="1" {% if filters.pending %}checked{% endif %}>
-      Pending
-    </label>
-    <button type="submit">Filter</button>
-    <a href="/transactions"><button type="button" class="btn-reset">Reset</button></a>
+    <div class="filter-actions">
+      <label>
+        Limit
+        <input type="number" name="limit" value="{{ filters.limit }}" min="10" max="500" style="width:80px">
+      </label>
+      <label class="check-label">
+        <input type="checkbox" name="pending" value="1" {% if filters.pending %}checked{% endif %}>
+        Pending
+      </label>
+      <button type="submit">Filter</button>
+      <a href="/transactions"><button type="button" class="btn-reset">Reset</button></a>
+    </div>
   </form>
 </section>
 
@@ -66,7 +68,12 @@
               {{ t.account_name or '—' }}
               {% if t.account_mask %}<span class="mono">···{{ t.account_mask }}</span>{% endif %}
             </td>
-            <td>{{ t.effective_category or '—' }}</td>
+            <td>
+              <a href="/transactions/{{ t.transaction_id }}" style="color:inherit;display:inline-flex;align-items:center;gap:4px">
+                {{ t.effective_category or '—' }}
+                <span style="color:var(--muted);font-size:11px">✎</span>
+              </a>
+            </td>
             <td class="mono">{{ t.transaction_id }}</td>
           </tr>
           {% endfor %}
