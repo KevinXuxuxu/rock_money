@@ -68,6 +68,7 @@ def accounts_page():
 
 @app.get("/transactions")
 def transactions_page():
+    q = request.args.get("q", "").strip() or None
     account_id = request.args.get("account") or None
     category = request.args.get("category") or None
     month = request.args.get("month") or None
@@ -75,6 +76,7 @@ def transactions_page():
     limit = min(int(request.args.get("limit", 100)), 500)
 
     txns = analytics.get_transactions(
+        q=q,
         limit=limit,
         account_id=account_id,
         category=category,
@@ -82,11 +84,21 @@ def transactions_page():
         pending=pending,
     )
     accounts = analytics.get_accounts()
+    categories = analytics.get_categories()
+    views = db.list_views()
+    for v in views:
+        v["query_string"] = urlencode(
+            {k: val for k, val in v["filters"].items() if val}
+        )
+
     return render_template(
         "transactions.html",
         txns=txns,
         accounts=accounts,
+        categories=categories,
+        views=views,
         filters={
+            "q": q or "",
             "account": account_id or "",
             "category": category or "",
             "month": month or "",
@@ -94,6 +106,11 @@ def transactions_page():
             "limit": limit,
         },
     )
+
+
+@app.get("/search")
+def search_page():
+    return redirect(url_for("transactions_page", **request.args), 301)
 
 
 @app.get("/reports")
@@ -119,49 +136,7 @@ def reports_page():
     )
 
 
-@app.get("/search")
-def search_page():
-    q = request.args.get("q", "")
-    month = request.args.get("month") or None
-    category = request.args.get("category") or None
-    account_id = request.args.get("account") or None
-    limit = min(int(request.args.get("limit", 50)), 500)
-
-    txns = []
-    if q or month or category or account_id:
-        txns = analytics.get_transactions(
-            q=q or None,
-            month=month,
-            category=category,
-            account_id=account_id,
-            limit=limit,
-        )
-
-    accounts = analytics.get_accounts()
-    categories = analytics.get_categories()
-    views = db.list_views()
-    for v in views:
-        v["query_string"] = urlencode(
-            {k: val for k, val in v["filters"].items() if val}
-        )
-
-    return render_template(
-        "search.html",
-        txns=txns,
-        accounts=accounts,
-        categories=categories,
-        views=views,
-        filters={
-            "q": q,
-            "month": month or "",
-            "category": category or "",
-            "account": account_id or "",
-            "limit": limit,
-        },
-    )
-
-
-@app.post("/search/views")
+@app.post("/transactions/views")
 def save_view():
     name = request.form.get("name", "").strip()
     filters = {
@@ -173,13 +148,13 @@ def save_view():
     if name:
         db.upsert_view(name, filters)
     active = {k: v for k, v in filters.items() if v}
-    return redirect(url_for("search_page", **active))
+    return redirect(url_for("transactions_page", **active))
 
 
-@app.post("/search/views/<name>/delete")
+@app.post("/transactions/views/<name>/delete")
 def delete_view(name):
     db.delete_view(name)
-    return redirect(url_for("search_page"))
+    return redirect(url_for("transactions_page"))
 
 
 @app.get("/transactions/<txn_id>")

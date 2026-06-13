@@ -117,27 +117,43 @@ class TestAccountsPage:
 
 
 class TestTransactionsPage:
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_returns_200(self, mock_txns, mock_accts, client):
+    def test_returns_200(self, mock_txns, mock_accts, mock_cats, mock_views, client):
         mock_accts.return_value = [make_account()]
         mock_txns.return_value = [make_txn()]
+        mock_cats.return_value = []
+        mock_views.return_value = []
         resp = client.get("/transactions")
         assert resp.status_code == 200
 
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_shows_merchant_name(self, mock_txns, mock_accts, client):
+    def test_shows_merchant_name(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
         mock_accts.return_value = []
         mock_txns.return_value = [make_txn(merchant_name="Whole Foods")]
+        mock_cats.return_value = []
+        mock_views.return_value = []
         resp = client.get("/transactions")
         assert b"Whole Foods" in resp.data
 
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_filter_params_passed_through(self, mock_txns, mock_accts, client):
+    def test_filter_params_passed_through(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
         mock_accts.return_value = []
         mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
 
         client.get("/transactions?month=2026-05&category=GROCERIES&limit=25")
 
@@ -146,101 +162,48 @@ class TestTransactionsPage:
         assert call_kwargs["category"] == "GROCERIES"
         assert call_kwargs["limit"] == 25
 
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_empty_state(self, mock_txns, mock_accts, client):
+    def test_empty_state(self, mock_txns, mock_accts, mock_cats, mock_views, client):
         mock_accts.return_value = []
         mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
         resp = client.get("/transactions")
         assert resp.status_code == 200
         assert b"No transactions" in resp.data
 
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_shows_effective_category(self, mock_txns, mock_accts, client):
+    def test_shows_effective_category(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
         mock_accts.return_value = []
         mock_txns.return_value = [make_txn(effective_category="My Custom")]
+        mock_cats.return_value = []
+        mock_views.return_value = []
         resp = client.get("/transactions")
         assert b"My Custom" in resp.data
 
-
-class TestSearchPage:
     @patch("db.list_views")
     @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_returns_200(self, mock_txns, mock_accts, mock_cats, mock_views, client):
-        mock_txns.return_value = []
-        mock_accts.return_value = []
-        mock_cats.return_value = ["GROCERIES", "DINING"]
-        mock_views.return_value = []
-        resp = client.get("/search")
-        assert resp.status_code == 200
-
-    @patch("db.list_views")
-    @patch("analytics.get_categories")
-    @patch("analytics.get_accounts")
-    @patch("analytics.get_transactions")
-    def test_q_passed_to_get_transactions(
+    def test_q_filter_passed_through(
         self, mock_txns, mock_accts, mock_cats, mock_views, client
     ):
-        mock_txns.return_value = []
         mock_accts.return_value = []
+        mock_txns.return_value = []
         mock_cats.return_value = []
         mock_views.return_value = []
 
-        client.get("/search?q=netflix")
+        client.get("/transactions?q=netflix")
 
         assert mock_txns.call_args.kwargs["q"] == "netflix"
-
-    @patch("db.list_views")
-    @patch("analytics.get_categories")
-    @patch("analytics.get_accounts")
-    @patch("analytics.get_transactions")
-    def test_shows_result_merchant(
-        self, mock_txns, mock_accts, mock_cats, mock_views, client
-    ):
-        mock_txns.return_value = [
-            make_txn(merchant_name="Starbucks", effective_category="COFFEE")
-        ]
-        mock_accts.return_value = []
-        mock_cats.return_value = ["COFFEE"]
-        mock_views.return_value = []
-
-        resp = client.get("/search?q=starbucks")
-        assert b"Starbucks" in resp.data
-
-    @patch("db.list_views")
-    @patch("analytics.get_categories")
-    @patch("analytics.get_accounts")
-    @patch("analytics.get_transactions")
-    def test_no_query_shows_no_results(
-        self, mock_txns, mock_accts, mock_cats, mock_views, client
-    ):
-        mock_accts.return_value = []
-        mock_cats.return_value = []
-        mock_views.return_value = []
-
-        resp = client.get("/search")
-        mock_txns.assert_not_called()
-        assert resp.status_code == 200
-
-    @patch("db.list_views")
-    @patch("analytics.get_categories")
-    @patch("analytics.get_accounts")
-    def test_shows_saved_views(self, mock_accts, mock_cats, mock_views, client):
-        mock_accts.return_value = []
-        mock_cats.return_value = []
-        mock_views.return_value = [
-            {
-                "name": "Netflix",
-                "filters": {"q": "netflix"},
-                "query_string": "q=netflix",
-            },
-        ]
-
-        resp = client.get("/search")
-        assert b"Netflix" in resp.data
 
     @patch("db.list_views")
     @patch("analytics.get_categories")
@@ -249,14 +212,63 @@ class TestSearchPage:
     def test_category_dropdown_populated(
         self, mock_txns, mock_accts, mock_cats, mock_views, client
     ):
-        mock_txns.return_value = []
         mock_accts.return_value = []
+        mock_txns.return_value = []
         mock_cats.return_value = ["DINING", "GROCERIES", "TRANSPORTATION"]
         mock_views.return_value = []
 
-        resp = client.get("/search")
+        resp = client.get("/transactions")
         assert b"GROCERIES" in resp.data
         assert b"TRANSPORTATION" in resp.data
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_saved_views_shown(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = [
+            {
+                "name": "Netflix",
+                "filters": {"q": "netflix", "month": "", "category": "", "account": ""},
+            },
+        ]
+
+        resp = client.get("/transactions")
+        assert b"Netflix" in resp.data
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_note_column_shown(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_accts.return_value = []
+        mock_txns.return_value = [make_txn(note="reimbursable")]
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        resp = client.get("/transactions")
+        assert b"reimbursable" in resp.data
+
+
+class TestSearchPage:
+    def test_redirects_to_transactions(self, client):
+        resp = client.get("/search")
+        assert resp.status_code == 301
+        assert "/transactions" in resp.headers["Location"]
+
+    def test_preserves_query_params(self, client):
+        resp = client.get("/search?q=netflix&month=2026-05")
+        assert resp.status_code == 301
+        location = resp.headers["Location"]
+        assert "q=netflix" in location
+        assert "month=2026-05" in location
 
 
 class TestTransactionDetailPage:

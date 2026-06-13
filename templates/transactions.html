@@ -4,42 +4,80 @@
 {% block content %}
 <h2>Transactions</h2>
 
-<section>
-  <form class="filters" method="get" action="/transactions">
-    <label>
-      Month
-      <input type="month" name="month" value="{{ filters.month }}" placeholder="YYYY-MM">
-    </label>
-    <label>
-      Account
-      <select name="account">
-        <option value="">All accounts</option>
-        {% for a in accounts %}
-        <option value="{{ a.account_id }}" {% if filters.account == a.account_id %}selected{% endif %}>
-          {{ a.name }}{% if a.mask %} ···{{ a.mask }}{% endif %}
-        </option>
-        {% endfor %}
-      </select>
-    </label>
-    <label>
-      Category
-      <input type="text" name="category" value="{{ filters.category }}" placeholder="e.g. GROCERIES">
-    </label>
-    <div class="filter-actions">
-      <label>
-        Limit
-        <input type="number" name="limit" value="{{ filters.limit }}" min="10" max="500" style="width:80px">
-      </label>
-      <label class="check-label">
-        <input type="checkbox" name="pending" value="1" {% if filters.pending %}checked{% endif %}>
-        Pending
-      </label>
-      <button type="submit">Filter</button>
-      <a href="/transactions"><button type="button" class="btn-reset">Reset</button></a>
-    </div>
+<!-- Saved views -->
+{% if views %}
+<div style="margin-bottom:16px">
+  {% for v in views %}
+  <a class="chip" href="/transactions?{{ v.query_string }}">{{ v.name }}</a>
+  <form method="post" action="/transactions/views/{{ v.name }}/delete" style="display:inline">
+    <button type="submit" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:12px;padding:0 0 0 2px" title="Delete view">×</button>
   </form>
-</section>
+  {% endfor %}
+</div>
+{% endif %}
 
+<!-- Filters -->
+<form class="filters" method="get" action="/transactions">
+  <label>
+    Search
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="merchant, name, or note…" style="min-width:180px">
+  </label>
+  <label>
+    Month
+    <input type="month" name="month" value="{{ filters.month }}">
+  </label>
+  <label>
+    Category
+    <select name="category">
+      <option value="">All categories</option>
+      {% for cat in categories %}
+      <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ cat }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>
+    Account
+    <select name="account">
+      <option value="">All accounts</option>
+      {% for a in accounts %}
+      <option value="{{ a.account_id }}" {% if filters.account == a.account_id %}selected{% endif %}>
+        {{ a.name }}{% if a.mask %} ···{{ a.mask }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </label>
+  <div class="filter-actions">
+    <label>
+      Limit
+      <input type="number" name="limit" value="{{ filters.limit }}" min="10" max="500" style="width:80px">
+    </label>
+    <label class="check-label">
+      <input type="checkbox" name="pending" value="1" {% if filters.pending %}checked{% endif %}>
+      Pending
+    </label>
+    <button type="submit">Filter</button>
+    <a href="/transactions"><button type="button" class="btn-reset">Reset</button></a>
+  </div>
+</form>
+
+<!-- Save view (shown when a named filter is active) -->
+{% if filters.q or filters.month or filters.category or filters.account %}
+<form method="post" action="/transactions/views"
+      style="display:flex;gap:8px;margin-bottom:20px;align-items:center;flex-wrap:wrap">
+  <input type="hidden" name="q"        value="{{ filters.q }}">
+  <input type="hidden" name="month"    value="{{ filters.month }}">
+  <input type="hidden" name="category" value="{{ filters.category }}">
+  <input type="hidden" name="account"  value="{{ filters.account }}">
+  <input type="text" name="name" placeholder="Save this search as…"
+         style="border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:14px;min-width:180px">
+  <button type="submit"
+          style="background:var(--card);color:var(--blue);border:1px solid var(--blue);border-radius:8px;padding:7px 14px;font-size:14px;cursor:pointer;white-space:nowrap">
+    Save view
+  </button>
+</form>
+{% endif %}
+
+<!-- Results -->
 <section>
   <div class="card">
     {% if txns %}
@@ -55,7 +93,7 @@
             <th>Merchant</th>
             <th>Account</th>
             <th>Category</th>
-            <th>ID</th>
+            <th>Note</th>
           </tr>
         </thead>
         <tbody>
@@ -63,25 +101,30 @@
           <tr>
             <td class="muted">{{ t.date }}</td>
             <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
-            <td><a href="/transactions/{{ t.transaction_id }}" style="color:var(--blue)">{{ t.merchant_name or t.name or '—' }}</a></td>
+            <td>
+              <a href="/transactions/{{ t.transaction_id }}" style="color:var(--blue)">
+                {{ t.merchant_name or t.name or '—' }}
+              </a>
+            </td>
             <td class="muted">
               {{ t.account_name or '—' }}
               {% if t.account_mask %}<span class="mono">···{{ t.account_mask }}</span>{% endif %}
             </td>
             <td>
-              <a href="/transactions/{{ t.transaction_id }}" style="color:inherit;display:inline-flex;align-items:center;gap:4px">
+              <a href="/transactions/{{ t.transaction_id }}"
+                 style="color:inherit;display:inline-flex;align-items:center;gap:4px">
                 {{ t.effective_category or '—' }}
                 <span style="color:var(--muted);font-size:11px">✎</span>
               </a>
             </td>
-            <td class="mono">{{ t.transaction_id }}</td>
+            <td class="muted" style="font-size:13px">{{ t.note or '' }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-      <div class="empty">No transactions found for the selected filters.</div>
+      <div class="empty">No transactions found.</div>
     {% endif %}
   </div>
 </section>
