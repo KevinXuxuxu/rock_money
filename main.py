@@ -98,6 +98,53 @@ def cmd_list_txns(args):
         print(f"{date_str:<12} {amt_str:>10} {merchant:<32} {acct:<20} {cat}")
 
 
+def cmd_report_spend(args):
+    """Show spending by category for a given month."""
+    import analytics
+    from datetime import datetime
+
+    month = args.month
+    if not month:
+        month = datetime.now().strftime("%Y-%m")
+
+    rows = analytics.spend_by_category(month)
+    if not rows:
+        print(f"No spending found for {month}.")
+        return
+
+    print(f"\nSpending by Category — {month}")
+    print(f"{'Category':<36} {'Spend':>10} {'Txns':>6}")
+    print("-" * 56)
+    total = 0
+    for r in rows:
+        cat   = (r["category"] or "Uncategorized")[:35]
+        spend = float(r["total_spend"])
+        count = r["txn_count"]
+        total += spend
+        print(f"{cat:<36} ${spend:>9,.2f} {count:>6}")
+    print("-" * 56)
+    print(f"{'TOTAL':<36} ${total:>9,.2f}")
+
+
+def cmd_report_monthly(args):
+    """Show month-over-month income vs spend summary."""
+    import analytics
+
+    rows = analytics.monthly_summary(months=args.months)
+    if not rows:
+        print("No transaction data found.")
+        return
+
+    print(f"\n{'Month':<10} {'Income':>12} {'Spend':>12} {'Net':>12}")
+    print("-" * 50)
+    for r in rows:
+        month  = str(r["month"])[:7]
+        income = float(r["income"]) if r["income"] else 0
+        spend  = float(r["spend"]) if r["spend"] else 0
+        net    = float(r["net"]) if r["net"] else 0
+        print(f"{month:<10} ${income:>11,.2f} ${spend:>11,.2f} ${net:>11,.2f}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="finance",
@@ -122,6 +169,16 @@ def main():
     # accounts
     p_acct = sub.add_parser("accounts", help="List all accounts with transaction counts")
     p_acct.set_defaults(func=cmd_accounts)
+
+    # report-spend
+    p_rspend = sub.add_parser("report-spend", help="Spending by category for a month")
+    p_rspend.add_argument("--month", type=str, help="Month YYYY-MM (default: current month)")
+    p_rspend.set_defaults(func=cmd_report_spend)
+
+    # report-monthly
+    p_rmonth = sub.add_parser("report-monthly", help="Month-over-month income vs spend")
+    p_rmonth.add_argument("--months", type=int, default=12, help="Number of months to show (default: 12)")
+    p_rmonth.set_defaults(func=cmd_report_monthly)
 
     # list-txns
     p_txns = sub.add_parser("list-txns", help="List recent transactions")

@@ -62,6 +62,60 @@ def get_transactions(
             return [dict(row) for row in cur.fetchall()]
 
 
+def spend_by_category(month: str) -> list[dict]:
+    """
+    Return spending summed by Plaid personal_finance_category for a given month.
+
+    Args:
+        month: YYYY-MM — e.g. '2026-06'
+    """
+    with db.get_conn() as conn:
+        import psycopg2.extras
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT personal_finance_category AS category,
+                       SUM(amount) AS total_spend,
+                       COUNT(*)   AS txn_count
+                FROM transactions
+                WHERE pending = FALSE
+                  AND amount > 0
+                  AND date_trunc('month', date) = %s::date
+                GROUP BY personal_finance_category
+                ORDER BY total_spend DESC
+            """, (f"{month}-01",))
+            return [dict(row) for row in cur.fetchall()]
+
+
+def monthly_summary(months: int = 12) -> list[dict]:
+    """
+    Return month-over-month income, spend, and net summary.
+
+    Args:
+        months: number of calendar months to look back (default 12)
+    """
+    with db.get_conn() as conn:
+        import psycopg2.extras
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT month,
+                       income,
+                       spend,
+                       (income - spend) AS net
+                FROM (
+                    SELECT date_trunc('month', date)::date AS month,
+                           COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS income,
+                           COALESCE(SUM(CASE WHEN amount > 0 THEN  amount ELSE 0 END), 0) AS spend
+                    FROM transactions
+                    WHERE pending = FALSE
+                    GROUP BY date_trunc('month', date)
+                    ORDER BY month DESC
+                    LIMIT %s
+                ) sub
+                ORDER BY month
+            """, (months,))
+            return [dict(row) for row in cur.fetchall()]
+
+
 def get_accounts() -> list[dict]:
     """Return all accounts with transaction counts."""
     with db.get_conn() as conn:
