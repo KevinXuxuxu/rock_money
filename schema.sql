@@ -73,3 +73,12 @@ CREATE TABLE IF NOT EXISTS category_rules (
 );
 
 CREATE INDEX IF NOT EXISTS idx_category_overrides_category ON category_overrides(category);
+
+-- ── Budgets ───────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS budgets (
+    category   TEXT    PRIMARY KEY,
+    monthly_limit NUMERIC(14, 4) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

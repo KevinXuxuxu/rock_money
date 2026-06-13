@@ -128,6 +128,48 @@ def monthly_summary(months: int = 12) -> list[dict]:
             return [dict(row) for row in cur.fetchall()]
 
 
+def budget_status(month: str) -> list[dict]:
+    """
+    Return budget vs actual spend per category for a given month.
+
+    Each row: {category, monthly_limit, actual_spend, remaining, pct_used}
+    Categories with a budget but no spending are included (actual=0).
+    """
+    budgets = db.list_budgets()
+    if not budgets:
+        return []
+
+    spend_rows = spend_by_category(month)
+    spend_map = {r["category"]: float(r["total_spend"]) for r in spend_rows}
+
+    results = []
+    for b in budgets:
+        cat = b["category"]
+        limit = float(b["monthly_limit"])
+        actual = spend_map.get(cat, 0.0)
+        remaining = limit - actual
+        pct_used = (actual / limit * 100) if limit > 0 else 0.0
+        results.append(
+            {
+                "category": cat,
+                "monthly_limit": limit,
+                "actual_spend": actual,
+                "remaining": remaining,
+                "pct_used": pct_used,
+            }
+        )
+    results.sort(key=lambda r: r["pct_used"], reverse=True)
+    return results
+
+
+def budget_alert(month: str, threshold: float = 80.0) -> list[dict]:
+    """
+    Return budget rows where pct_used >= threshold (default 80%).
+    Rows are sorted by pct_used descending.
+    """
+    return [r for r in budget_status(month) if r["pct_used"] >= threshold]
+
+
 def get_accounts() -> list[dict]:
     """Return all accounts with transaction counts."""
     with db.get_conn() as conn:

@@ -300,6 +300,38 @@ def list_category_rules() -> list[dict]:
             return [dict(row) for row in cur.fetchall()]
 
 
+# ── Budgets ────────────────────────────────────────────────────────────────────
+
+
+def upsert_budget(category: str, monthly_limit: float) -> None:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO budgets (category, monthly_limit)
+                VALUES (%s, %s)
+                ON CONFLICT (category) DO UPDATE SET
+                    monthly_limit = EXCLUDED.monthly_limit,
+                    updated_at    = NOW()
+                """,
+                (category, monthly_limit),
+            )
+
+
+def list_budgets() -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM budgets ORDER BY category")
+            return [dict(row) for row in cur.fetchall()]
+
+
+def delete_budget(category: str) -> bool:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM budgets WHERE category = %s", (category,))
+            return cur.rowcount > 0
+
+
 def delete_transactions(transaction_ids: list[str]) -> int:
     if not transaction_ids:
         return 0

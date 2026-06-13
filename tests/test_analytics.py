@@ -244,6 +244,145 @@ class TestRuleMatching:
         assert analytics._rule_matches("Anything", "")
 
 
+# ── Phase 4: Budget management ────────────────────────────────────────────────
+
+
+class TestBudgetStatus:
+    """Phase 4: budget_status()"""
+
+    def test_returns_budget_rows_with_actuals(self, mock_db):
+        with (
+            patch("db.list_budgets") as mock_budgets,
+            patch("analytics.spend_by_category") as mock_spend,
+        ):
+            mock_budgets.return_value = [
+                {"category": "GROCERIES", "monthly_limit": 600.00},
+            ]
+            mock_spend.return_value = [
+                {"category": "GROCERIES", "total_spend": 350.00, "txn_count": 8},
+            ]
+
+            result = analytics.budget_status("2026-06")
+
+        assert len(result) == 1
+        row = result[0]
+        assert row["category"] == "GROCERIES"
+        assert row["monthly_limit"] == 600.00
+        assert row["actual_spend"] == 350.00
+        assert row["remaining"] == 250.00
+        assert abs(row["pct_used"] - 58.33) < 0.01
+
+    def test_zero_actual_when_no_spending(self, mock_db):
+        with (
+            patch("db.list_budgets") as mock_budgets,
+            patch("analytics.spend_by_category") as mock_spend,
+        ):
+            mock_budgets.return_value = [
+                {"category": "TRAVEL", "monthly_limit": 500.00},
+            ]
+            mock_spend.return_value = []  # no spending this month
+
+            result = analytics.budget_status("2026-06")
+
+        assert result[0]["actual_spend"] == 0.0
+        assert result[0]["remaining"] == 500.00
+        assert result[0]["pct_used"] == 0.0
+
+    def test_sorted_by_pct_used_desc(self, mock_db):
+        with (
+            patch("db.list_budgets") as mock_budgets,
+            patch("analytics.spend_by_category") as mock_spend,
+        ):
+            mock_budgets.return_value = [
+                {"category": "GROCERIES", "monthly_limit": 600.00},
+                {"category": "DINING", "monthly_limit": 200.00},
+            ]
+            mock_spend.return_value = [
+                {"category": "GROCERIES", "total_spend": 120.00, "txn_count": 3},
+                {"category": "DINING", "total_spend": 190.00, "txn_count": 5},
+            ]
+
+            result = analytics.budget_status("2026-06")
+
+        # DINING is at 95%, GROCERIES at 20%
+        assert result[0]["category"] == "DINING"
+        assert result[1]["category"] == "GROCERIES"
+
+    def test_returns_empty_when_no_budgets(self, mock_db):
+        with patch("db.list_budgets") as mock_budgets:
+            mock_budgets.return_value = []
+            result = analytics.budget_status("2026-06")
+        assert result == []
+
+    def test_over_budget_shows_negative_remaining(self, mock_db):
+        with (
+            patch("db.list_budgets") as mock_budgets,
+            patch("analytics.spend_by_category") as mock_spend,
+        ):
+            mock_budgets.return_value = [
+                {"category": "DINING", "monthly_limit": 100.00},
+            ]
+            mock_spend.return_value = [
+                {"category": "DINING", "total_spend": 150.00, "txn_count": 6},
+            ]
+
+            result = analytics.budget_status("2026-06")
+
+        assert result[0]["remaining"] == -50.00
+        assert result[0]["pct_used"] == 150.0
+
+
+class TestBudgetAlert:
+    """Phase 4: budget_alert()"""
+
+    def test_returns_rows_above_threshold(self):
+        with patch("analytics.budget_status") as mock_status:
+            mock_status.return_value = [
+                {
+                    "category": "DINING",
+                    "pct_used": 95.0,
+                    "monthly_limit": 200.0,
+                    "actual_spend": 190.0,
+                },
+                {
+                    "category": "GROCERIES",
+                    "pct_used": 50.0,
+                    "monthly_limit": 600.0,
+                    "actual_spend": 300.0,
+                },
+            ]
+
+            result = analytics.budget_alert("2026-06", threshold=80.0)
+
+        assert len(result) == 1
+        assert result[0]["category"] == "DINING"
+
+    def test_default_threshold_is_80(self):
+        with patch("analytics.budget_status") as mock_status:
+            mock_status.return_value = [
+                {"category": "A", "pct_used": 79.9},
+                {"category": "B", "pct_used": 80.0},
+                {"category": "C", "pct_used": 100.0},
+            ]
+
+            result = analytics.budget_alert("2026-06")
+
+        categories = [r["category"] for r in result]
+        assert "A" not in categories
+        assert "B" in categories
+        assert "C" in categories
+
+    def test_returns_empty_when_all_under_threshold(self):
+        with patch("analytics.budget_status") as mock_status:
+            mock_status.return_value = [
+                {"category": "GROCERIES", "pct_used": 30.0},
+            ]
+
+            result = analytics.budget_alert("2026-06", threshold=80.0)
+
+        assert result == []
+
+
 class TestResolveCategory:
     """Phase 3: resolve_category()"""
 

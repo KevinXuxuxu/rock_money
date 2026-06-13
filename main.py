@@ -223,6 +223,93 @@ def cmd_rule_remove(args):
         print(f"No rule found with id {args.rule_id}.")
 
 
+def cmd_budget_set(args):
+    """Set (or update) a monthly budget for a category."""
+    import db
+
+    db.upsert_budget(args.category, args.amount)
+    print(f"Budget set: {args.category} → ${args.amount:,.2f}/month")
+
+
+def cmd_budget_list(args):
+    """List all budgets."""
+    import db
+
+    budgets = db.list_budgets()
+    if not budgets:
+        print("No budgets set. Use `budget-set` to create one.")
+        return
+
+    print(f"{'Category':<36} {'Monthly Limit':>14}")
+    print("-" * 52)
+    for b in budgets:
+        cat = b["category"][:35]
+        print(f"{cat:<36} ${float(b['monthly_limit']):>13,.2f}")
+
+
+def cmd_budget_delete(args):
+    """Remove a budget."""
+    import db
+
+    deleted = db.delete_budget(args.category)
+    if deleted:
+        print(f"Budget for '{args.category}' removed.")
+    else:
+        print(f"No budget found for '{args.category}'.")
+
+
+def cmd_budget_status(args):
+    """Show budget vs actual spend for a month."""
+    import analytics
+    from datetime import datetime
+
+    month = args.month or datetime.now().strftime("%Y-%m")
+    rows = analytics.budget_status(month)
+    if not rows:
+        print("No budgets set. Use `budget-set` to create one.")
+        return
+
+    print(f"\nBudget Status — {month}")
+    print(
+        f"{'Category':<28} {'Limit':>10} {'Spent':>10} {'Remaining':>10} {'Used%':>7}"
+    )
+    print("-" * 70)
+    for r in rows:
+        cat = r["category"][:27]
+        limit = r["monthly_limit"]
+        actual = r["actual_spend"]
+        remaining = r["remaining"]
+        pct = r["pct_used"]
+        flag = " !" if pct >= 100 else (" ~" if pct >= 80 else "")
+        print(
+            f"{cat:<28} ${limit:>9,.2f} ${actual:>9,.2f} ${remaining:>9,.2f} {pct:>6.1f}%{flag}"
+        )
+
+
+def cmd_budget_alert(args):
+    """Show categories that are on pace to overshoot their budget."""
+    import analytics
+    from datetime import datetime
+
+    month = args.month or datetime.now().strftime("%Y-%m")
+    threshold = args.threshold
+    rows = analytics.budget_alert(month, threshold=threshold)
+    if not rows:
+        print(f"No categories over {threshold:.0f}% of budget for {month}.")
+        return
+
+    print(f"\nBudget Alerts ({threshold:.0f}%+ used) — {month}")
+    print(f"{'Category':<28} {'Limit':>10} {'Spent':>10} {'Used%':>7}")
+    print("-" * 60)
+    for r in rows:
+        cat = r["category"][:27]
+        flag = " OVER!" if r["pct_used"] >= 100 else ""
+        print(
+            f"{cat:<28} ${r['monthly_limit']:>9,.2f} ${r['actual_spend']:>9,.2f} "
+            f"{r['pct_used']:>6.1f}%{flag}"
+        )
+
+
 def cmd_rule_apply(args):
     """Apply rules to all un-categorized transactions."""
     import analytics
@@ -356,6 +443,43 @@ def main():
         "--dry-run", action="store_true", help="Preview matches without saving"
     )
     p_rapply.set_defaults(func=cmd_rule_apply)
+
+    # budget-set
+    p_bset = sub.add_parser("budget-set", help="Set a monthly budget for a category")
+    p_bset.add_argument("category", type=str, help="Category name")
+    p_bset.add_argument("amount", type=float, help="Monthly limit in dollars")
+    p_bset.set_defaults(func=cmd_budget_set)
+
+    # budget-list
+    p_blist = sub.add_parser("budget-list", help="List all budgets")
+    p_blist.set_defaults(func=cmd_budget_list)
+
+    # budget-delete
+    p_bdel = sub.add_parser("budget-delete", help="Remove a budget")
+    p_bdel.add_argument("category", type=str, help="Category name")
+    p_bdel.set_defaults(func=cmd_budget_delete)
+
+    # budget-status
+    p_bstat = sub.add_parser("budget-status", help="Budget vs actual spend for a month")
+    p_bstat.add_argument(
+        "--month", type=str, help="Month YYYY-MM (default: current month)"
+    )
+    p_bstat.set_defaults(func=cmd_budget_status)
+
+    # budget-alert
+    p_balert = sub.add_parser(
+        "budget-alert", help="Flag categories over a usage threshold"
+    )
+    p_balert.add_argument(
+        "--month", type=str, help="Month YYYY-MM (default: current month)"
+    )
+    p_balert.add_argument(
+        "--threshold",
+        type=float,
+        default=80.0,
+        help="Alert threshold as percent used (default: 80)",
+    )
+    p_balert.set_defaults(func=cmd_budget_alert)
 
     # list-items
     p_list = sub.add_parser("list-items", help="List all linked institutions")

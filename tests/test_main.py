@@ -159,6 +159,117 @@ class TestCliSmoke:
         assert "1,800.00" in out
 
 
+class TestBudgetCommands:
+    """Phase 4: budget-set, budget-list, budget-delete, budget-status, budget-alert"""
+
+    @patch("db.upsert_budget")
+    def test_cmd_budget_set(self, mock_upsert, capsys):
+        from argparse import Namespace
+
+        main.cmd_budget_set(Namespace(category="Groceries", amount=600.0))
+        out = capsys.readouterr().out
+        mock_upsert.assert_called_once_with("Groceries", 600.0)
+        assert "Groceries" in out
+        assert "600.00" in out
+
+    @patch("db.list_budgets")
+    def test_cmd_budget_list_empty(self, mock_list, capsys):
+        mock_list.return_value = []
+        from argparse import Namespace
+
+        main.cmd_budget_list(Namespace())
+        out = capsys.readouterr().out
+        assert "No budgets" in out
+
+    @patch("db.list_budgets")
+    def test_cmd_budget_list_with_data(self, mock_list, capsys):
+        mock_list.return_value = [
+            {"category": "Groceries", "monthly_limit": 600.00},
+        ]
+        from argparse import Namespace
+
+        main.cmd_budget_list(Namespace())
+        out = capsys.readouterr().out
+        assert "Groceries" in out
+        assert "600.00" in out
+
+    @patch("db.delete_budget")
+    def test_cmd_budget_delete_found(self, mock_delete, capsys):
+        mock_delete.return_value = True
+        from argparse import Namespace
+
+        main.cmd_budget_delete(Namespace(category="Groceries"))
+        out = capsys.readouterr().out
+        assert "removed" in out
+
+    @patch("db.delete_budget")
+    def test_cmd_budget_delete_not_found(self, mock_delete, capsys):
+        mock_delete.return_value = False
+        from argparse import Namespace
+
+        main.cmd_budget_delete(Namespace(category="Groceries"))
+        out = capsys.readouterr().out
+        assert "No budget" in out
+
+    @patch("analytics.budget_status")
+    def test_cmd_budget_status(self, mock_status, capsys):
+        mock_status.return_value = [
+            {
+                "category": "GROCERIES",
+                "monthly_limit": 600.0,
+                "actual_spend": 350.0,
+                "remaining": 250.0,
+                "pct_used": 58.3,
+            },
+        ]
+        from argparse import Namespace
+
+        main.cmd_budget_status(Namespace(month="2026-06"))
+        out = capsys.readouterr().out
+        assert "GROCERIES" in out
+        assert "600.00" in out
+        assert "350.00" in out
+        assert "58.3" in out
+
+    @patch("analytics.budget_status")
+    def test_cmd_budget_status_defaults_current_month(self, mock_status, capsys):
+        mock_status.return_value = []
+        from argparse import Namespace
+
+        main.cmd_budget_status(Namespace(month=None))
+        import datetime
+
+        called_month = mock_status.call_args.args[0]
+        assert called_month == datetime.datetime.now().strftime("%Y-%m")
+
+    @patch("analytics.budget_alert")
+    def test_cmd_budget_alert_with_alerts(self, mock_alert, capsys):
+        mock_alert.return_value = [
+            {
+                "category": "DINING",
+                "monthly_limit": 200.0,
+                "actual_spend": 190.0,
+                "pct_used": 95.0,
+            },
+        ]
+        from argparse import Namespace
+
+        main.cmd_budget_alert(Namespace(month="2026-06", threshold=80.0))
+        out = capsys.readouterr().out
+        mock_alert.assert_called_once_with("2026-06", threshold=80.0)
+        assert "DINING" in out
+        assert "95.0" in out
+
+    @patch("analytics.budget_alert")
+    def test_cmd_budget_alert_empty(self, mock_alert, capsys):
+        mock_alert.return_value = []
+        from argparse import Namespace
+
+        main.cmd_budget_alert(Namespace(month="2026-06", threshold=80.0))
+        out = capsys.readouterr().out
+        assert "No categories" in out
+
+
 class TestCategoryCommands:
     """Phase 3: categorize, uncategorize, rule-* commands"""
 
