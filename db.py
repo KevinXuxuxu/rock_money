@@ -42,7 +42,13 @@ def init_schema(schema_path: str = "schema.sql") -> None:
 
 # ── Items ──────────────────────────────────────────────────────────────────────
 
-def upsert_item(item_id: str, access_token: str, institution_id: str | None, institution_name: str | None) -> None:
+
+def upsert_item(
+    item_id: str,
+    access_token: str,
+    institution_id: str | None,
+    institution_name: str | None,
+) -> None:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -79,10 +85,13 @@ def list_items() -> list[dict]:
 
 # ── Cursors ────────────────────────────────────────────────────────────────────
 
+
 def get_cursor(item_id: str) -> str | None:
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT cursor FROM sync_cursors WHERE item_id = %s", (item_id,))
+            cur.execute(
+                "SELECT cursor FROM sync_cursors WHERE item_id = %s", (item_id,)
+            )
             row = cur.fetchone()
             return row[0] if row else None
 
@@ -103,6 +112,7 @@ def set_cursor(item_id: str, cursor: str) -> None:
 
 
 # ── Accounts ───────────────────────────────────────────────────────────────────
+
 
 def upsert_accounts(accounts: list[dict]) -> None:
     if not accounts:
@@ -139,6 +149,7 @@ def upsert_accounts(accounts: list[dict]) -> None:
 
 
 # ── Transactions ───────────────────────────────────────────────────────────────
+
 
 def upsert_transactions(txns: list[dict]) -> int:
     if not txns:
@@ -192,8 +203,12 @@ def upsert_transactions(txns: list[dict]) -> int:
                         t.get("category"),
                         t.get("personal_finance_category"),
                         t.get("personal_finance_category_confidence"),
-                        psycopg2.extras.Json(t["location"]) if t.get("location") else None,
-                        psycopg2.extras.Json(t["counterparties"]) if t.get("counterparties") else None,
+                        psycopg2.extras.Json(t["location"])
+                        if t.get("location")
+                        else None,
+                        psycopg2.extras.Json(t["counterparties"])
+                        if t.get("counterparties")
+                        else None,
                     )
                     for t in txns
                 ],

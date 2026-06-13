@@ -2,6 +2,7 @@
 Query functions for analytics, reports, and dashboards.
 All functions use the existing db.get_conn() pool and return lists of dicts.
 """
+
 import db
 
 
@@ -57,6 +58,7 @@ def get_transactions(
 
     with db.get_conn() as conn:
         import psycopg2.extras
+
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
@@ -71,8 +73,10 @@ def spend_by_category(month: str) -> list[dict]:
     """
     with db.get_conn() as conn:
         import psycopg2.extras
+
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT personal_finance_category AS category,
                        SUM(amount) AS total_spend,
                        COUNT(*)   AS txn_count
@@ -82,7 +86,9 @@ def spend_by_category(month: str) -> list[dict]:
                   AND date_trunc('month', date) = %s::date
                 GROUP BY personal_finance_category
                 ORDER BY total_spend DESC
-            """, (f"{month}-01",))
+            """,
+                (f"{month}-01",),
+            )
             return [dict(row) for row in cur.fetchall()]
 
 
@@ -95,8 +101,10 @@ def monthly_summary(months: int = 12) -> list[dict]:
     """
     with db.get_conn() as conn:
         import psycopg2.extras
+
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT month,
                        income,
                        spend,
@@ -112,7 +120,9 @@ def monthly_summary(months: int = 12) -> list[dict]:
                     LIMIT %s
                 ) sub
                 ORDER BY month
-            """, (months,))
+            """,
+                (months,),
+            )
             return [dict(row) for row in cur.fetchall()]
 
 
@@ -120,6 +130,7 @@ def get_accounts() -> list[dict]:
     """Return all accounts with transaction counts."""
     with db.get_conn() as conn:
         import psycopg2.extras
+
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
                 SELECT a.account_id, a.name, a.official_name, a.type, a.subtype,

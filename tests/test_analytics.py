@@ -1,4 +1,5 @@
 """Tests for analytics.py — all DB interaction is mocked via the mock_db fixture."""
+
 import analytics
 from tests.conftest import make_txn, make_account
 
@@ -129,8 +130,18 @@ class TestMonthlySummary:
 
     def test_returns_ordered_by_month(self, mock_db):
         mock_db.fetchall.return_value = [
-            {"month": "2026-04-01", "income": 5000.00, "spend": 3200.00, "net": 1800.00},
-            {"month": "2026-05-01", "income": 5100.00, "spend": 3400.00, "net": 1700.00},
+            {
+                "month": "2026-04-01",
+                "income": 5000.00,
+                "spend": 3200.00,
+                "net": 1800.00,
+            },
+            {
+                "month": "2026-05-01",
+                "income": 5100.00,
+                "spend": 3400.00,
+                "net": 1700.00,
+            },
         ]
 
         result = analytics.monthly_summary()

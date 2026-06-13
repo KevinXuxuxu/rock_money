@@ -2,6 +2,7 @@
 Shared test fixtures. Mock the database at the db.py boundary so tests
 never touch PostgreSQL.
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -29,6 +30,7 @@ def mock_db():
 
 
 # ── Sample data builders ────────────────────────────────────────────────────
+
 
 def make_txn(**overrides) -> dict:
     """Build a transaction dict as returned by the database (RealDictCursor row)."""

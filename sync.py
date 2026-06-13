@@ -24,13 +24,13 @@ def sync_item(item_id: str, access_token: str, verbose: bool = True) -> dict:
         accounts = [{**a, "item_id": item_id} for a in page_data["accounts"]]
         db.upsert_accounts(accounts)
 
-        n_added    = db.upsert_transactions(page_data["added"] + page_data["modified"])
-        n_removed  = db.delete_transactions(page_data["removed"])
+        db.upsert_transactions(page_data["added"] + page_data["modified"])
+        n_removed = db.delete_transactions(page_data["removed"])
         db.set_cursor(item_id, page_data["next_cursor"])
 
-        total["added"]    += len(page_data["added"])
+        total["added"] += len(page_data["added"])
         total["modified"] += len(page_data["modified"])
-        total["removed"]  += n_removed
+        total["removed"] += n_removed
 
         if verbose:
             print(
@@ -65,7 +65,10 @@ def sync_all(verbose: bool = True) -> None:
         # Fetch access_token for this item
         with db.get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT access_token FROM items WHERE item_id = %s", (item["item_id"],))
+                cur.execute(
+                    "SELECT access_token FROM items WHERE item_id = %s",
+                    (item["item_id"],),
+                )
                 row = cur.fetchone()
         if not row:
             print("  Skipping — access token not found.")

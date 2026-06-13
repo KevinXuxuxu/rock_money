@@ -3,6 +3,7 @@ Temporary Flask server for the Plaid Link flow.
 Run via `python main.py link` — starts the server, opens the browser,
 then shuts down automatically after a successful account link.
 """
+
 import threading
 import webbrowser
 
@@ -54,6 +55,7 @@ def run(port: int = 8765) -> None:
     """Open browser and start Flask. Blocks until a successful link."""
     global _redirect_uri
     import os
+
     local_url = f"http://localhost:{port}"
     # Plaid production rejects http:// redirect URIs; use PLAID_REDIRECT_URI
     # (e.g. an ngrok https URL) for OAuth institutions in production.
@@ -61,15 +63,25 @@ def run(port: int = 8765) -> None:
     if _redirect_uri:
         print(f"OAuth redirect URI: {_redirect_uri}")
     else:
-        print("No PLAID_REDIRECT_URI set — OAuth institutions (Chase, BofA, etc.) will not be available.")
-        print("To enable them: run `ngrok http 8765`, set PLAID_REDIRECT_URI=https://<your-ngrok-url>,")
-        print("and add that URL to Plaid dashboard → Team Settings → API → Allowed redirect URIs.\n")
+        print(
+            "No PLAID_REDIRECT_URI set — OAuth institutions (Chase, BofA, etc.) will not be available."
+        )
+        print(
+            "To enable them: run `ngrok http 8765`, set PLAID_REDIRECT_URI=https://<your-ngrok-url>,"
+        )
+        print(
+            "and add that URL to Plaid dashboard → Team Settings → API → Allowed redirect URIs.\n"
+        )
     print(f"Opening Plaid Link at {local_url}")
-    print("Complete the bank connection in your browser. This server will stop automatically.\n")
+    print(
+        "Complete the bank connection in your browser. This server will stop automatically.\n"
+    )
     webbrowser.open(local_url)
 
     server_thread = threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False),
+        target=lambda: app.run(
+            host="0.0.0.0", port=port, debug=False, use_reloader=False
+        ),
         daemon=True,
     )
     server_thread.start()
