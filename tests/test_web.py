@@ -125,15 +125,19 @@ class TestSyncAccounts:
         assert "/accounts" in resp.headers["Location"]
         mock_sync.assert_called_once_with(verbose=False)
 
+    @patch("analytics.get_accounts")
     @patch("sync.sync_all")
-    def test_flashes_success(self, mock_sync, client):
+    def test_flashes_success(self, mock_sync, mock_accts, client):
         mock_sync.return_value = None
+        mock_accts.return_value = []
         resp = client.post("/accounts/sync", follow_redirects=True)
         assert b"Sync complete" in resp.data
 
+    @patch("analytics.get_accounts")
     @patch("sync.sync_all")
-    def test_flashes_error_on_failure(self, mock_sync, client):
+    def test_flashes_error_on_failure(self, mock_sync, mock_accts, client):
         mock_sync.side_effect = RuntimeError("connection refused")
+        mock_accts.return_value = []
         resp = client.post("/accounts/sync", follow_redirects=True)
         assert b"Sync failed" in resp.data
         assert b"connection refused" in resp.data
