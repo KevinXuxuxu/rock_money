@@ -2,7 +2,27 @@
 {% block title %}Accounts{% endblock %}
 
 {% block content %}
-<h2>Accounts</h2>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+  <h2 style="margin:0">Accounts</h2>
+  <div style="display:flex;gap:10px">
+    <form method="post" action="/accounts/sync" id="sync-form">
+      <button type="submit" id="sync-btn"
+              style="background:var(--card);color:var(--blue);border:1px solid var(--blue);
+                     border-radius:8px;padding:8px 16px;font-size:14px;font-weight:500;
+                     cursor:pointer;white-space:nowrap">
+        Sync All
+      </button>
+    </form>
+    <button id="link-btn" onclick="openPlaidLink()"
+            style="background:var(--blue);color:white;border:none;border-radius:8px;
+                   padding:8px 16px;font-size:14px;font-weight:500;cursor:pointer;
+                   white-space:nowrap">
+      Connect Account
+    </button>
+  </div>
+</div>
+
+<div id="link-status" style="display:none;margin-bottom:16px;padding:11px 16px;border-radius:8px;font-size:14px"></div>
 
 <section>
   <div class="card">
@@ -41,8 +61,83 @@
       </table>
     </div>
     {% else %}
-      <div class="empty">No accounts. Run <code>link</code> to connect a bank account.</div>
+      <div class="empty">No accounts yet. Click <strong>Connect Account</strong> to link a bank.</div>
     {% endif %}
   </div>
 </section>
+
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+  // Show status message below the heading
+  function setStatus(msg, type) {
+    var el = document.getElementById('link-status');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+    el.style.background = type === 'error' ? '#fee2e2' : '#d1fae5';
+    el.style.color    = type === 'error' ? '#991b1b' : '#065f46';
+  }
+
+  var linkToken = null;
+
+  async function fetchLinkToken() {
+    var res  = await fetch('/api/link-token');
+    var data = await res.json();
+    if (data.error) { setStatus('Error: ' + data.error, 'error'); return false; }
+    linkToken = data.link_token;
+    return true;
+  }
+
+  function buildHandler(extraConfig) {
+    return Plaid.create({
+      token: linkToken,
+      ...extraConfig,
+      onSuccess: async function(public_token, metadata) {
+        document.getElementById('link-btn').disabled = true;
+        setStatus('Saving account…', 'success');
+        var res  = await fetch('/api/exchange', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ public_token: public_token }),
+        });
+        var data = await res.json();
+        if (data.ok) {
+          setStatus('Connected: ' + (data.institution_name || 'Account linked') + '. Reloading…', 'success');
+          setTimeout(function() { window.location.reload(); }, 1200);
+        } else {
+          setStatus('Error: ' + data.error, 'error');
+          document.getElementById('link-btn').disabled = false;
+        }
+      },
+      onExit: function(err) {
+        if (err) setStatus(err.error_code + ': ' + (err.display_message || err.error_message || 'Link exited.'), 'error');
+      },
+    });
+  }
+
+  async function openPlaidLink() {
+    if (!linkToken) {
+      setStatus('Initializing…', 'success');
+      var ok = await fetchLinkToken();
+      if (!ok) return;
+      setStatus('', '');
+    }
+    buildHandler({}).open();
+  }
+
+  // Sync button: show loading state while form submits
+  document.getElementById('sync-form').addEventListener('submit', function() {
+    var btn = document.getElementById('sync-btn');
+    btn.disabled = true;
+    btn.textContent = 'Syncing…';
+  });
+
+  // OAuth redirect return (production institutions like Chase/BofA)
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('oauth_state_id')) {
+    (async function() {
+      await fetchLinkToken();
+      if (linkToken) buildHandler({ receivedRedirectUri: window.location.href }).open();
+    })();
+  }
+</script>
 {% endblock %}

@@ -116,6 +116,87 @@ class TestAccountsPage:
         assert b"No accounts" in resp.data
 
 
+class TestSyncAccounts:
+    @patch("sync.sync_all")
+    def test_redirects_on_success(self, mock_sync, client):
+        mock_sync.return_value = None
+        resp = client.post("/accounts/sync")
+        assert resp.status_code == 302
+        assert "/accounts" in resp.headers["Location"]
+        mock_sync.assert_called_once_with(verbose=False)
+
+    @patch("sync.sync_all")
+    def test_flashes_success(self, mock_sync, client):
+        mock_sync.return_value = None
+        resp = client.post("/accounts/sync", follow_redirects=True)
+        assert b"Sync complete" in resp.data
+
+    @patch("sync.sync_all")
+    def test_flashes_error_on_failure(self, mock_sync, client):
+        mock_sync.side_effect = RuntimeError("connection refused")
+        resp = client.post("/accounts/sync", follow_redirects=True)
+        assert b"Sync failed" in resp.data
+        assert b"connection refused" in resp.data
+
+
+class TestApiLinkToken:
+    @patch("web_server._get_plaid")
+    def test_returns_link_token(self, mock_get_plaid, client):
+        mock_get_plaid.return_value.create_link_token.return_value = "link-sandbox-abc"
+        resp = client.get("/api/link-token")
+        assert resp.status_code == 200
+        assert resp.get_json()["link_token"] == "link-sandbox-abc"
+
+    @patch("web_server._get_plaid")
+    def test_returns_error_on_failure(self, mock_get_plaid, client):
+        mock_get_plaid.return_value.create_link_token.side_effect = RuntimeError(
+            "bad key"
+        )
+        resp = client.get("/api/link-token")
+        assert resp.status_code == 500
+        assert "error" in resp.get_json()
+
+
+class TestApiExchange:
+    @patch("db.upsert_item")
+    @patch("web_server._get_plaid")
+    def test_exchanges_and_saves(self, mock_get_plaid, mock_upsert, client):
+        plaid = mock_get_plaid.return_value
+        plaid.exchange_public_token.return_value = ("access-sandbox-123", "item-abc")
+        plaid.get_institution_name.return_value = ("ins_1", "Chase")
+
+        resp = client.post(
+            "/api/exchange",
+            json={"public_token": "public-sandbox-xyz"},
+        )
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert data["ok"] is True
+        assert data["institution_name"] == "Chase"
+        mock_upsert.assert_called_once_with(
+            "item-abc", "access-sandbox-123", "ins_1", "Chase"
+        )
+
+    def test_missing_public_token_returns_400(self, client):
+        resp = client.post("/api/exchange", json={})
+        assert resp.status_code == 400
+        assert resp.get_json()["ok"] is False
+
+    @patch("web_server._get_plaid")
+    def test_exchange_failure_returns_error(self, mock_get_plaid, client):
+        mock_get_plaid.return_value.exchange_public_token.side_effect = RuntimeError(
+            "invalid token"
+        )
+        resp = client.post(
+            "/api/exchange",
+            json={"public_token": "public-sandbox-bad"},
+        )
+        assert resp.status_code == 500
+        data = resp.get_json()
+        assert data["ok"] is False
+        assert "invalid token" in data["error"]
+
+
 class TestTransactionsPage:
     @patch("db.list_views")
     @patch("analytics.get_categories")

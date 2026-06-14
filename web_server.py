@@ -5,10 +5,22 @@ import os
 from datetime import datetime
 from urllib.parse import urlencode
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 import analytics
 import db
+import sync as sync_mod
+from plaid_client import PlaidClient
+
+_plaid: PlaidClient | None = None
+
+
+def _get_plaid() -> PlaidClient:
+    global _plaid
+    if _plaid is None:
+        _plaid = PlaidClient()
+    return _plaid
+
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -64,6 +76,49 @@ def dashboard():
 def accounts_page():
     accounts = analytics.get_accounts()
     return render_template("accounts.html", accounts=accounts)
+
+
+@app.post("/accounts/sync")
+def sync_accounts():
+    try:
+        sync_mod.sync_all(verbose=False)
+        flash("Sync complete.", "success")
+    except Exception as exc:
+        _log.error("sync failed: %s", exc)
+        flash(f"Sync failed: {exc}", "error")
+    return redirect(url_for("accounts_page"))
+
+
+@app.get("/api/link-token")
+def api_link_token():
+    import os
+
+    try:
+        redirect_uri = os.environ.get("PLAID_REDIRECT_URI") or None
+        token = _get_plaid().create_link_token(redirect_uri=redirect_uri)
+        return jsonify({"link_token": token})
+    except Exception as exc:
+        _log.error("create_link_token failed: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.post("/api/exchange")
+def api_exchange():
+    data = request.get_json(force=True)
+    public_token = data.get("public_token")
+    if not public_token:
+        return jsonify({"ok": False, "error": "missing public_token"}), 400
+    try:
+        access_token, item_id = _get_plaid().exchange_public_token(public_token)
+        institution_id, institution_name = _get_plaid().get_institution_name(
+            access_token
+        )
+        db.upsert_item(item_id, access_token, institution_id, institution_name)
+        _log.info("linked institution: %s (item_id=%s)", institution_name, item_id)
+        return jsonify({"ok": True, "institution_name": institution_name})
+    except Exception as exc:
+        _log.error("exchange failed: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 @app.get("/transactions")
