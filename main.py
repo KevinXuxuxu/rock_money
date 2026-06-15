@@ -439,15 +439,12 @@ def cmd_detect_transfers(args):
 
     label = "Would mark" if args.dry_run else "Marked"
     print(f"\n{label} {len(pairs)} internal transfer pair(s):\n")
-    print(
-        f"  {'Amount':>10}  {'Date A':<12} {'Account A':<24} {'Date B':<12} {'Account B'}"
-    )
-    print("  " + "-" * 80)
+    print(f"  {'Amount':>10}  {'Transfer ID':<20} {'Account A':<24} {'Account B'}")
+    print("  " + "-" * 76)
     for p in pairs:
-        amount = float(p["amount"])
         print(
-            f"  ${abs(amount):>9,.2f}  {str(p['date_a']):<12} {(p['account_a'] or '—'):<24} "
-            f"{str(p['date_b']):<12} {p['account_b'] or '—'}"
+            f"  ${p['amount']:>9,.2f}  {p['transfer_id']:<20} "
+            f"{(p['account_a'] or '—'):<24} {p['account_b'] or '—'}"
         )
 
 

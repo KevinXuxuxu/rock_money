@@ -4,6 +4,7 @@ All functions use the existing db.get_conn() pool and return lists of dicts.
 """
 
 import logging
+import re
 
 import db
 
@@ -265,53 +266,95 @@ def get_accounts() -> list[dict]:
 
 # ── Internal transfer detection ──────────────────────────────────────────────
 
-_TRANSFER_PLAID_CATEGORIES = frozenset({"TRANSFER_IN", "TRANSFER_OUT"})
+# Each pattern must have exactly one capture group — the shared transfer reference ID.
+# Add new bank patterns here as they're discovered.
+_TRANSFER_ID_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(IITCIT[A-Z0-9]+)\b", re.IGNORECASE),  # Citi cross-institution
+    re.compile(r"transaction#:\s*(\d+)", re.IGNORECASE),  # Chase internal transfer
+]
+
+
+def extract_transfer_id(text: str) -> str | None:
+    """
+    Extract a bank-assigned transfer reference ID from a transaction name field.
+    Returns the ID uppercased for consistent matching, or None if no pattern matches.
+    """
+    if not text:
+        return None
+    for pattern in _TRANSFER_ID_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            return m.group(1).upper()
+    return None
 
 
 def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
     """
-    Find TRANSFER_IN / TRANSFER_OUT pairs across different accounts whose amounts
-    cancel out (within $0.01) and that settled within 5 days of each other.
-    Writes 'INTERNAL TRANSFER' overrides for both legs unless either already has
-    a manual override.
+    Find TRANSFER_IN/OUT pairs that share a bank-assigned transfer ID and whose
+    amounts cancel out (within $0.01). ID is extracted from the name field
+    (falling back to merchant_name) using _TRANSFER_ID_PATTERNS.
+
+    Skips transactions that already have a manual category override.
+    Writes 'INTERNAL TRANSFER' overrides for both legs unless dry_run=True.
 
     Returns a list of matched pairs:
-        {txn_id_a, txn_id_b, amount, date_a, date_b, account_a, account_b}
+        {txn_id_a, txn_id_b, transfer_id, amount, account_a, account_b}
     """
     with db.get_conn() as conn:
         import psycopg2.extras
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT t1.transaction_id AS txn_id_a,
-                       t2.transaction_id AS txn_id_b,
-                       t1.amount         AS amount,
-                       t1.date           AS date_a,
-                       t2.date           AS date_b,
-                       a1.name           AS account_a,
-                       a2.name           AS account_b
-                FROM transactions t1
-                JOIN transactions t2 ON (
-                    t1.account_id != t2.account_id
-                    AND ABS(t1.amount + t2.amount) < 0.01
-                    AND ABS(t1.date - t2.date) <= 5
-                    AND t2.personal_finance_category IN ('TRANSFER_IN', 'TRANSFER_OUT')
-                )
-                JOIN accounts a1 ON a1.account_id = t1.account_id
-                JOIN accounts a2 ON a2.account_id = t2.account_id
-                WHERE t1.transaction_id < t2.transaction_id
-                  AND t1.personal_finance_category IN ('TRANSFER_IN', 'TRANSFER_OUT')
+                SELECT t.transaction_id, t.amount, t.name, t.merchant_name,
+                       a.name AS account_name
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                WHERE t.personal_finance_category IN ('TRANSFER_IN', 'TRANSFER_OUT')
                   AND NOT EXISTS (
                       SELECT 1 FROM category_overrides
-                      WHERE transaction_id = t1.transaction_id
+                      WHERE transaction_id = t.transaction_id
                   )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM category_overrides
-                      WHERE transaction_id = t2.transaction_id
-                  )
-                ORDER BY t1.date DESC
             """)
-            pairs = [dict(row) for row in cur.fetchall()]
+            transactions = [dict(row) for row in cur.fetchall()]
+
+    # Group by extracted transfer ID
+    by_id: dict[str, list[dict]] = {}
+    for txn in transactions:
+        tid = extract_transfer_id(txn.get("name") or "") or extract_transfer_id(
+            txn.get("merchant_name") or ""
+        )
+        if tid:
+            by_id.setdefault(tid, []).append(txn)
+
+    pairs = []
+    for tid, txns in by_id.items():
+        if len(txns) != 2:
+            _log.warning(
+                "detect_internal_transfers: %d txn(s) share transfer_id=%s, skipping",
+                len(txns),
+                tid,
+            )
+            continue
+        a, b = txns
+        if abs(float(a["amount"]) + float(b["amount"])) >= 0.01:
+            _log.warning(
+                "detect_internal_transfers: amounts don't cancel for transfer_id=%s "
+                "(%.2f + %.2f)",
+                tid,
+                a["amount"],
+                b["amount"],
+            )
+            continue
+        pairs.append(
+            {
+                "txn_id_a": a["transaction_id"],
+                "txn_id_b": b["transaction_id"],
+                "transfer_id": tid,
+                "amount": abs(float(a["amount"])),
+                "account_a": a["account_name"],
+                "account_b": b["account_name"],
+            }
+        )
 
     _log.info(
         "detect_internal_transfers: %d pair(s) found, dry_run=%s", len(pairs), dry_run
