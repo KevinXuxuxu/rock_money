@@ -632,6 +632,21 @@ class TestDetectInternalTransfers:
         assert len(pairs) == 2
         assert mock_upsert.call_count == 4
 
+    def test_idempotent_second_run_is_noop(self, mock_db):
+        """Second call writes no overrides when NOT EXISTS has already filtered the pairs."""
+        with patch("db.upsert_category_override") as mock_upsert:
+            # First run: pair found, both legs overridden.
+            mock_db.fetchall.return_value = self._PAIR
+            analytics.detect_internal_transfers(dry_run=False)
+            assert mock_upsert.call_count == 2
+
+            # Second run: NOT EXISTS filters them out — DB returns nothing.
+            mock_db.fetchall.return_value = []
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+
+        assert pairs == []
+        assert mock_upsert.call_count == 2  # no new writes
+
 
 class TestInternalCategoryFiltering:
     """spend_by_category and monthly_summary must exclude INTERNAL TRANSFER and CREDIT PAYMENT."""
@@ -927,6 +942,24 @@ class TestApplyRules:
         assert len(results) == 1
         assert results[0]["new_category"] == "Subscriptions"
         assert results[0]["rule_id"] == 1
+
+    @patch("db.upsert_category_override")
+    @patch("db.list_category_rules")
+    def test_idempotent_second_run_is_noop(self, mock_rules, mock_upsert, mock_db):
+        """Second apply_rules call writes nothing when NOT EXISTS filtered the transactions."""
+        mock_rules.return_value = [self._RULE]
+
+        # First run: match found, override written.
+        mock_db.fetchall.return_value = [self._TXN_MATCH]
+        analytics.apply_rules(dry_run=False)
+        assert mock_upsert.call_count == 1
+
+        # Second run: NOT EXISTS filters out already-overridden transactions.
+        mock_db.fetchall.return_value = []
+        results = analytics.apply_rules(dry_run=False)
+
+        assert results == []
+        assert mock_upsert.call_count == 1  # no new writes
 
     @patch("db.upsert_category_override")
     @patch("db.list_category_rules")
