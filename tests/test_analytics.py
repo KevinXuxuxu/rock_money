@@ -540,33 +540,85 @@ class TestBudgetAlert:
 # ── Phase 7: Search & detail ──────────────────────────────────────────────────
 
 
+class TestExtractTransferId:
+    """extract_transfer_id() — pure regex extraction, no DB."""
+
+    def test_citi_cross_institution(self):
+        assert analytics.extract_transfer_id("IITCITDSYAUB7FW") == "IITCITDSYAUB7FW"
+
+    def test_citi_case_insensitive(self):
+        assert analytics.extract_transfer_id("Iitcitdsyaub7fw") == "IITCITDSYAUB7FW"
+
+    def test_citi_embedded_in_longer_string(self):
+        assert (
+            analytics.extract_transfer_id("Transfer IITCITDSYAUB7FW online")
+            == "IITCITDSYAUB7FW"
+        )
+
+    def test_chase_transaction_number(self):
+        assert (
+            analytics.extract_transfer_id("transaction#: 28560921044") == "28560921044"
+        )
+
+    def test_chase_case_insensitive(self):
+        assert (
+            analytics.extract_transfer_id("TRANSACTION#: 28560921044") == "28560921044"
+        )
+
+    def test_chase_no_space(self):
+        assert (
+            analytics.extract_transfer_id("transaction#:28560921044") == "28560921044"
+        )
+
+    def test_returns_none_for_unrecognized(self):
+        assert analytics.extract_transfer_id("STARBUCKS #1234") is None
+
+    def test_returns_none_for_empty(self):
+        assert analytics.extract_transfer_id("") is None
+
+    def test_returns_none_for_partial_citi_prefix(self):
+        assert analytics.extract_transfer_id("IITCI") is None
+
+    def test_result_always_uppercased(self):
+        result = analytics.extract_transfer_id("transaction#: 28560921044")
+        assert result == result.upper()
+
+
 class TestDetectInternalTransfers:
     """detect_internal_transfers() — transfer pair detection and override writing."""
 
-    _PAIR = [
+    # DB now returns individual transactions; pairing happens in Python.
+    _TXNS = [
         {
-            "txn_id_a": "txn_out",
-            "txn_id_b": "txn_in",
+            "transaction_id": "txn_out",
             "amount": 500.00,
-            "date_a": "2026-06-10",
-            "date_b": "2026-06-11",
-            "account_a": "Personal Checking",
-            "account_b": "Joint Checking",
-        }
+            "name": "IITCITDSYAUB7FW",
+            "merchant_name": None,
+            "account_name": "Personal Checking",
+        },
+        {
+            "transaction_id": "txn_in",
+            "amount": -500.00,
+            "name": "IITCITDSYAUB7FW",
+            "merchant_name": None,
+            "account_name": "Joint Checking",
+        },
     ]
 
     def test_dry_run_returns_pairs_without_writing(self, mock_db):
-        mock_db.fetchall.return_value = self._PAIR
+        mock_db.fetchall.return_value = self._TXNS
 
         with patch("db.upsert_category_override") as mock_upsert:
             pairs = analytics.detect_internal_transfers(dry_run=True)
 
         assert len(pairs) == 1
         assert pairs[0]["txn_id_a"] == "txn_out"
+        assert pairs[0]["txn_id_b"] == "txn_in"
+        assert pairs[0]["transfer_id"] == "IITCITDSYAUB7FW"
         mock_upsert.assert_not_called()
 
     def test_apply_writes_override_for_both_legs(self, mock_db):
-        mock_db.fetchall.return_value = self._PAIR
+        mock_db.fetchall.return_value = self._TXNS
 
         with patch("db.upsert_category_override") as mock_upsert:
             analytics.detect_internal_transfers(dry_run=False)
@@ -585,16 +637,16 @@ class TestDetectInternalTransfers:
         assert pairs == []
         mock_upsert.assert_not_called()
 
-    def test_sql_matches_only_transfer_plaid_categories(self, mock_db):
+    def test_sql_filters_transfer_plaid_categories(self, mock_db):
         mock_db.fetchall.return_value = []
 
         analytics.detect_internal_transfers(dry_run=True)
 
         sql = mock_db.execute.call_args[0][0]
-        assert "'TRANSFER_IN', 'TRANSFER_OUT'" in sql or "TRANSFER_IN" in sql
+        assert "TRANSFER_IN" in sql and "TRANSFER_OUT" in sql
 
     def test_sql_excludes_already_overridden_transactions(self, mock_db):
-        """Must not clobber manual overrides on either leg."""
+        """Must not clobber manual overrides."""
         mock_db.fetchall.return_value = []
 
         analytics.detect_internal_transfers(dry_run=True)
@@ -602,28 +654,61 @@ class TestDetectInternalTransfers:
         sql = mock_db.execute.call_args[0][0]
         assert "NOT EXISTS" in sql
 
-    def test_sql_requires_different_accounts(self, mock_db):
-        """Same-account transfers are not internal pairs."""
-        mock_db.fetchall.return_value = []
+    def test_no_match_when_no_extractable_id(self, mock_db):
+        """Transactions without a recognised transfer ID pattern are ignored."""
+        mock_db.fetchall.return_value = [
+            {**self._TXNS[0], "name": "Online Transfer", "merchant_name": None},
+            {**self._TXNS[1], "name": "Online Transfer", "merchant_name": None},
+        ]
 
-        analytics.detect_internal_transfers(dry_run=True)
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=False)
 
-        sql = mock_db.execute.call_args[0][0]
-        assert "t1.account_id != t2.account_id" in sql
+        assert pairs == []
+        mock_upsert.assert_not_called()
 
-    def test_sql_matches_on_amount_and_date_window(self, mock_db):
-        mock_db.fetchall.return_value = []
+    def test_no_match_when_amounts_dont_cancel(self, mock_db):
+        """Same transfer ID but mismatched amounts — not a valid pair."""
+        mock_db.fetchall.return_value = [
+            {**self._TXNS[0], "amount": 500.00},
+            {**self._TXNS[1], "amount": -499.00},  # off by $1
+        ]
 
-        analytics.detect_internal_transfers(dry_run=True)
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=False)
 
-        sql = mock_db.execute.call_args[0][0]
-        assert "ABS(t1.amount + t2.amount) < 0.01" in sql
-        assert "ABS(t1.date - t2.date) <= 5" in sql
+        assert pairs == []
+        mock_upsert.assert_not_called()
+
+    def test_falls_back_to_merchant_name(self, mock_db):
+        """ID is extracted from merchant_name when name has no match."""
+        mock_db.fetchall.return_value = [
+            {**self._TXNS[0], "name": "Transfer", "merchant_name": "IITCITDSYAUB7FW"},
+            {**self._TXNS[1], "name": "Transfer", "merchant_name": "IITCITDSYAUB7FW"},
+        ]
+
+        pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert pairs[0]["transfer_id"] == "IITCITDSYAUB7FW"
+
+    def test_chase_pattern_matched(self, mock_db):
+        mock_db.fetchall.return_value = [
+            {**self._TXNS[0], "name": "transaction#: 28560921044"},
+            {**self._TXNS[1], "name": "transaction#: 28560921044"},
+        ]
+
+        pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert pairs[0]["transfer_id"] == "28560921044"
 
     def test_multiple_pairs_all_get_overrides(self, mock_db):
         mock_db.fetchall.return_value = [
-            {**self._PAIR[0], "txn_id_a": "out_1", "txn_id_b": "in_1"},
-            {**self._PAIR[0], "txn_id_a": "out_2", "txn_id_b": "in_2"},
+            {**self._TXNS[0], "transaction_id": "out_1", "name": "IITCITAAA111"},
+            {**self._TXNS[1], "transaction_id": "in_1", "name": "IITCITAAA111"},
+            {**self._TXNS[0], "transaction_id": "out_2", "name": "IITCITBBB222"},
+            {**self._TXNS[1], "transaction_id": "in_2", "name": "IITCITBBB222"},
         ]
 
         with patch("db.upsert_category_override") as mock_upsert:
@@ -636,7 +721,7 @@ class TestDetectInternalTransfers:
         """Second call writes no overrides when NOT EXISTS has already filtered the pairs."""
         with patch("db.upsert_category_override") as mock_upsert:
             # First run: pair found, both legs overridden.
-            mock_db.fetchall.return_value = self._PAIR
+            mock_db.fetchall.return_value = self._TXNS
             analytics.detect_internal_transfers(dry_run=False)
             assert mock_upsert.call_count == 2
 
@@ -646,6 +731,61 @@ class TestDetectInternalTransfers:
 
         assert pairs == []
         assert mock_upsert.call_count == 2  # no new writes
+
+    def test_citi_real_name_formats(self, mock_db):
+        """Real Citi cross-bank transfer names seen in production."""
+        mock_db.fetchall.return_value = [
+            {
+                "transaction_id": "txn_citi_out",
+                "amount": 1000.00,
+                "name": "Ach Electronic Debit - Iitcitdsyaub7fw",
+                "merchant_name": None,
+                "account_name": "Citi Checking",
+            },
+            {
+                "transaction_id": "txn_citi_in",
+                "amount": -1000.00,
+                "name": "IIT CITIBANK CITIXFR IITCITDSYAUB7FW WEB ID: 8264624602",
+                "merchant_name": None,
+                "account_name": "Chase Checking",
+            },
+        ]
+
+        pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert {pairs[0]["txn_id_a"], pairs[0]["txn_id_b"]} == {
+            "txn_citi_out",
+            "txn_citi_in",
+        }
+
+    def test_chase_real_name_formats(self, mock_db):
+        """Real Chase internal transfer names seen in production."""
+        mock_db.fetchall.return_value = [
+            {
+                "transaction_id": "txn_chase_out",
+                "amount": 500.00,
+                "name": "Online Transfer from CHK ...0695 transaction#: 28947127490",
+                "merchant_name": None,
+                "account_name": "Chase Savings",
+            },
+            {
+                "transaction_id": "txn_chase_in",
+                "amount": -500.00,
+                "name": "Online Transfer to CHK ...0709 transaction#: 28947127490 05/22",
+                "merchant_name": None,
+                "account_name": "Chase Checking",
+            },
+        ]
+
+        pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert {pairs[0]["txn_id_a"], pairs[0]["txn_id_b"]} == {
+            "txn_chase_out",
+            "txn_chase_in",
+        }
+        assert pairs[0]["transfer_id"] == "28947127490"
 
 
 class TestInternalCategoryFiltering:
