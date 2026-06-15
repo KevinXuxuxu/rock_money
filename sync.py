@@ -87,3 +87,13 @@ def sync_all(verbose: bool = True) -> None:
         matched = analytics.apply_rules(dry_run=False)
         if verbose and matched:
             print(f"  Categorised {len(matched)} transaction(s) via rules.")
+
+    # Auto-detect TRANSFER_IN/OUT pairs and mark them as INTERNAL TRANSFER.
+    if verbose:
+        print("\nDetecting internal transfers...")
+    pairs = analytics.detect_internal_transfers(dry_run=False)
+    if verbose:
+        if pairs:
+            print(f"  Marked {len(pairs)} transfer pair(s) as INTERNAL TRANSFER.")
+        else:
+            print("  No new transfer pairs found.")

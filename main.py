@@ -428,6 +428,29 @@ def cmd_web(args):
     web_server.run(port=args.port)
 
 
+def cmd_detect_transfers(args):
+    """Detect internal TRANSFER_IN/OUT pairs and mark them as INTERNAL TRANSFER."""
+    import analytics
+
+    pairs = analytics.detect_internal_transfers(dry_run=args.dry_run)
+    if not pairs:
+        print("No new transfer pairs found.")
+        return
+
+    label = "Would mark" if args.dry_run else "Marked"
+    print(f"\n{label} {len(pairs)} internal transfer pair(s):\n")
+    print(
+        f"  {'Amount':>10}  {'Date A':<12} {'Account A':<24} {'Date B':<12} {'Account B'}"
+    )
+    print("  " + "-" * 80)
+    for p in pairs:
+        amount = float(p["amount"])
+        print(
+            f"  ${abs(amount):>9,.2f}  {str(p['date_a']):<12} {(p['account_a'] or '—'):<24} "
+            f"{str(p['date_b']):<12} {p['account_b'] or '—'}"
+        )
+
+
 def cmd_rule_apply(args):
     """Apply rules to all un-categorized transactions."""
     import analytics
@@ -564,6 +587,16 @@ def main():
         "--dry-run", action="store_true", help="Preview matches without saving"
     )
     p_rapply.set_defaults(func=cmd_rule_apply)
+
+    # detect-transfers
+    p_dtrans = sub.add_parser(
+        "detect-transfers",
+        help="Detect TRANSFER_IN/OUT pairs and mark them as INTERNAL TRANSFER",
+    )
+    p_dtrans.add_argument(
+        "--dry-run", action="store_true", help="Preview pairs without saving"
+    )
+    p_dtrans.set_defaults(func=cmd_detect_transfers)
 
     # note
     p_note = sub.add_parser("note", help="Set or clear a note on a transaction")

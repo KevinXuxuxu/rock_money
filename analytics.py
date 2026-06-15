@@ -9,6 +9,11 @@ import db
 
 _log = logging.getLogger(__name__)
 
+# Categories treated as internal noise — excluded from spend/income aggregations.
+# CREDIT PAYMENT: credit card payments (covered by user rules).
+# INTERNAL TRANSFER: detected TRANSFER_IN/OUT pairs between linked accounts.
+INTERNAL_CATEGORIES: frozenset[str] = frozenset({"INTERNAL TRANSFER", "CREDIT PAYMENT"})
+
 
 def get_transactions(
     *,
@@ -100,6 +105,8 @@ def spend_by_category(month: str) -> list[dict]:
                 WHERE t.pending = FALSE
                   AND t.amount > 0
                   AND date_trunc('month', t.date) = %s::date
+                  AND COALESCE(co.category, t.personal_finance_category)
+                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
                 GROUP BY COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_spend DESC
             """,
@@ -126,12 +133,15 @@ def monthly_summary(months: int = 12) -> list[dict]:
                        spend,
                        (income - spend) AS net
                 FROM (
-                    SELECT date_trunc('month', date)::date AS month,
-                           COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS income,
-                           COALESCE(SUM(CASE WHEN amount > 0 THEN  amount ELSE 0 END), 0) AS spend
-                    FROM transactions
-                    WHERE pending = FALSE
-                    GROUP BY date_trunc('month', date)
+                    SELECT date_trunc('month', t.date)::date AS month,
+                           COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS income,
+                           COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS spend
+                    FROM transactions t
+                    LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                    WHERE t.pending = FALSE
+                      AND COALESCE(co.category, t.personal_finance_category)
+                          NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                    GROUP BY date_trunc('month', t.date)
                     ORDER BY month DESC
                     LIMIT %s
                 ) sub
@@ -251,6 +261,68 @@ def get_accounts() -> list[dict]:
                 ORDER BY i.institution_name, a.name
             """)
             return [dict(row) for row in cur.fetchall()]
+
+
+# ── Internal transfer detection ──────────────────────────────────────────────
+
+_TRANSFER_PLAID_CATEGORIES = frozenset({"TRANSFER_IN", "TRANSFER_OUT"})
+
+
+def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
+    """
+    Find TRANSFER_IN / TRANSFER_OUT pairs across different accounts whose amounts
+    cancel out (within $0.01) and that settled within 5 days of each other.
+    Writes 'INTERNAL TRANSFER' overrides for both legs unless either already has
+    a manual override.
+
+    Returns a list of matched pairs:
+        {txn_id_a, txn_id_b, amount, date_a, date_b, account_a, account_b}
+    """
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("""
+                SELECT t1.transaction_id AS txn_id_a,
+                       t2.transaction_id AS txn_id_b,
+                       t1.amount         AS amount,
+                       t1.date           AS date_a,
+                       t2.date           AS date_b,
+                       a1.name           AS account_a,
+                       a2.name           AS account_b
+                FROM transactions t1
+                JOIN transactions t2 ON (
+                    t1.account_id != t2.account_id
+                    AND ABS(t1.amount + t2.amount) < 0.01
+                    AND ABS(t1.date - t2.date) <= 5
+                    AND t2.personal_finance_category IN ('TRANSFER_IN', 'TRANSFER_OUT')
+                )
+                JOIN accounts a1 ON a1.account_id = t1.account_id
+                JOIN accounts a2 ON a2.account_id = t2.account_id
+                WHERE t1.transaction_id < t2.transaction_id
+                  AND t1.personal_finance_category IN ('TRANSFER_IN', 'TRANSFER_OUT')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM category_overrides
+                      WHERE transaction_id = t1.transaction_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM category_overrides
+                      WHERE transaction_id = t2.transaction_id
+                  )
+                ORDER BY t1.date DESC
+            """)
+            pairs = [dict(row) for row in cur.fetchall()]
+
+    _log.info(
+        "detect_internal_transfers: %d pair(s) found, dry_run=%s", len(pairs), dry_run
+    )
+
+    if not dry_run:
+        for pair in pairs:
+            db.upsert_category_override(pair["txn_id_a"], "INTERNAL TRANSFER")
+            db.upsert_category_override(pair["txn_id_b"], "INTERNAL TRANSFER")
+
+    return pairs
 
 
 # ── Category resolution ──────────────────────────────────────────────────────

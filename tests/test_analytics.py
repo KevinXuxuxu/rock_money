@@ -349,9 +349,9 @@ class TestMonthlySummary:
 
         sql = mock_db.execute.call_args[0][0]
         # Income: negate credits (amount < 0)
-        assert "WHEN amount < 0 THEN -amount" in sql
+        assert "WHEN t.amount < 0 THEN -t.amount" in sql
         # Spend: sum debits (amount > 0)
-        assert "WHEN amount > 0 THEN  amount" in sql
+        assert "WHEN t.amount > 0 THEN  t.amount" in sql
 
 
 # ── Phase 3: Category resolution ─────────────────────────────────────────────
@@ -538,6 +538,136 @@ class TestBudgetAlert:
 
 
 # ── Phase 7: Search & detail ──────────────────────────────────────────────────
+
+
+class TestDetectInternalTransfers:
+    """detect_internal_transfers() — transfer pair detection and override writing."""
+
+    _PAIR = [
+        {
+            "txn_id_a": "txn_out",
+            "txn_id_b": "txn_in",
+            "amount": 500.00,
+            "date_a": "2026-06-10",
+            "date_b": "2026-06-11",
+            "account_a": "Personal Checking",
+            "account_b": "Joint Checking",
+        }
+    ]
+
+    def test_dry_run_returns_pairs_without_writing(self, mock_db):
+        mock_db.fetchall.return_value = self._PAIR
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert pairs[0]["txn_id_a"] == "txn_out"
+        mock_upsert.assert_not_called()
+
+    def test_apply_writes_override_for_both_legs(self, mock_db):
+        mock_db.fetchall.return_value = self._PAIR
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            analytics.detect_internal_transfers(dry_run=False)
+
+        assert mock_upsert.call_count == 2
+        calls = {c.args for c in mock_upsert.call_args_list}
+        assert ("txn_out", "INTERNAL TRANSFER") in calls
+        assert ("txn_in", "INTERNAL TRANSFER") in calls
+
+    def test_returns_empty_when_no_pairs(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+
+        assert pairs == []
+        mock_upsert.assert_not_called()
+
+    def test_sql_matches_only_transfer_plaid_categories(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "'TRANSFER_IN', 'TRANSFER_OUT'" in sql or "TRANSFER_IN" in sql
+
+    def test_sql_excludes_already_overridden_transactions(self, mock_db):
+        """Must not clobber manual overrides on either leg."""
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "NOT EXISTS" in sql
+
+    def test_sql_requires_different_accounts(self, mock_db):
+        """Same-account transfers are not internal pairs."""
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "t1.account_id != t2.account_id" in sql
+
+    def test_sql_matches_on_amount_and_date_window(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "ABS(t1.amount + t2.amount) < 0.01" in sql
+        assert "ABS(t1.date - t2.date) <= 5" in sql
+
+    def test_multiple_pairs_all_get_overrides(self, mock_db):
+        mock_db.fetchall.return_value = [
+            {**self._PAIR[0], "txn_id_a": "out_1", "txn_id_b": "in_1"},
+            {**self._PAIR[0], "txn_id_a": "out_2", "txn_id_b": "in_2"},
+        ]
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+
+        assert len(pairs) == 2
+        assert mock_upsert.call_count == 4
+
+
+class TestInternalCategoryFiltering:
+    """spend_by_category and monthly_summary must exclude INTERNAL TRANSFER and CREDIT PAYMENT."""
+
+    def test_spend_by_category_excludes_internal_transfer(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "INTERNAL TRANSFER" in sql
+        assert "CREDIT PAYMENT" in sql
+        assert "NOT IN" in sql
+
+    def test_monthly_summary_excludes_internal_transfer(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.monthly_summary()
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "INTERNAL TRANSFER" in sql
+        assert "CREDIT PAYMENT" in sql
+        assert "NOT IN" in sql
+
+    def test_monthly_summary_joins_category_overrides(self, mock_db):
+        """monthly_summary must join overrides so the category filter can see them."""
+        mock_db.fetchall.return_value = []
+
+        analytics.monthly_summary()
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "LEFT JOIN category_overrides co" in sql
+
+    def test_internal_categories_constant_contains_expected_values(self):
+        assert "INTERNAL TRANSFER" in analytics.INTERNAL_CATEGORIES
+        assert "CREDIT PAYMENT" in analytics.INTERNAL_CATEGORIES
 
 
 class TestGetCategories:
