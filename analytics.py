@@ -81,7 +81,7 @@ def get_transactions(
 
 def spend_by_category(month: str) -> list[dict]:
     """
-    Return spending summed by Plaid personal_finance_category for a given month.
+    Return spending summed by effective category for a given month.
 
     Args:
         month: YYYY-MM — e.g. '2026-06'
@@ -92,14 +92,15 @@ def spend_by_category(month: str) -> list[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT personal_finance_category AS category,
-                       SUM(amount) AS total_spend,
-                       COUNT(*)   AS txn_count
-                FROM transactions
-                WHERE pending = FALSE
-                  AND amount > 0
-                  AND date_trunc('month', date) = %s::date
-                GROUP BY personal_finance_category
+                SELECT COALESCE(co.category, t.personal_finance_category) AS category,
+                       SUM(t.amount) AS total_spend,
+                       COUNT(*)      AS txn_count
+                FROM transactions t
+                LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                WHERE t.pending = FALSE
+                  AND t.amount > 0
+                  AND date_trunc('month', t.date) = %s::date
+                GROUP BY COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_spend DESC
             """,
                 (f"{month}-01",),

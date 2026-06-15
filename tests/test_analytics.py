@@ -168,6 +168,138 @@ class TestSpendByCategory:
         sql = mock_db.execute.call_args[0][0]
         assert "amount > 0" in sql
 
+    def test_left_joins_category_overrides(self, mock_db):
+        """Regression: was using raw personal_finance_category, ignoring overrides."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "LEFT JOIN category_overrides co" in sql
+
+    def test_groups_by_effective_category(self, mock_db):
+        """Groups by COALESCE so overridden txns land in the correct bucket."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "COALESCE(co.category, t.personal_finance_category)" in sql
+
+    def test_overridden_transaction_appears_in_new_bucket(self, mock_db):
+        """TRANSFER_OUT overridden to LOAN_PAYMENT shows under LOAN_PAYMENT only."""
+        mock_db.fetchall.return_value = [
+            {"category": "LOAN_PAYMENT", "total_spend": 3400.75, "txn_count": 1},
+        ]
+
+        result = analytics.spend_by_category("2026-06")
+
+        categories = [r["category"] for r in result]
+        assert "LOAN_PAYMENT" in categories
+        assert "TRANSFER_OUT" not in categories
+
+
+class TestCategoryOverrideConsistency:
+    """
+    Cross-feature: all analytics functions that show category must use
+    COALESCE(override, plaid) so the dashboard, transactions list, category
+    filter, and budget totals all agree.
+    """
+
+    def test_spend_by_category_and_get_transactions_both_join_overrides(self, mock_db):
+        """Mismatch here is what caused dashboard vs transaction-list discrepancy."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+        spend_sql = mock_db.execute.call_args[0][0]
+
+        analytics.get_transactions(month="2026-06")
+        txns_sql = mock_db.execute.call_args[0][0]
+
+        assert "LEFT JOIN category_overrides co" in spend_sql
+        assert "LEFT JOIN category_overrides co" in txns_sql
+
+    def test_spend_by_category_and_get_transactions_use_same_coalesce(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+        spend_sql = mock_db.execute.call_args[0][0]
+
+        analytics.get_transactions(month="2026-06")
+        txns_sql = mock_db.execute.call_args[0][0]
+
+        coalesce = "COALESCE(co.category, t.personal_finance_category)"
+        assert coalesce in spend_sql
+        assert coalesce in txns_sql
+
+    def test_category_filter_on_get_transactions_uses_effective_category(self, mock_db):
+        """Filtering by category= matches overridden category, not raw Plaid value."""
+        mock_db.fetchall.return_value = []
+
+        analytics.get_transactions(category="LOAN_PAYMENT")
+
+        sql = mock_db.execute.call_args[0][0]
+        params = mock_db.execute.call_args[0][1]
+        assert "COALESCE(co.category, t.personal_finance_category) = %s" in sql
+        assert "LOAN_PAYMENT" in params
+
+    def test_get_categories_uses_effective_category(self, mock_db):
+        """get_categories returns override-resolved set, not raw Plaid categories."""
+        mock_db.fetchall.return_value = [("LOAN_PAYMENT",)]
+
+        result = analytics.get_categories()
+
+        assert "LOAN_PAYMENT" in result
+        sql = mock_db.execute.call_args[0][0]
+        assert "COALESCE(co.category, t.personal_finance_category)" in sql
+        assert "LEFT JOIN category_overrides co" in sql
+
+    def test_budget_status_sees_overridden_categories_via_spend(self, mock_db):
+        """budget_status delegates to spend_by_category, so it inherits effective categories.
+        A budget for LOAN_PAYMENT captures txns Plaid tagged as TRANSFER_OUT but overridden."""
+        with (
+            patch("db.list_budgets") as mock_budgets,
+            patch("analytics.spend_by_category") as mock_spend,
+        ):
+            mock_budgets.return_value = [
+                {"category": "LOAN_PAYMENT", "monthly_limit": 4000.00},
+            ]
+            mock_spend.return_value = [
+                {"category": "LOAN_PAYMENT", "total_spend": 3400.75, "txn_count": 2},
+            ]
+
+            result = analytics.budget_status("2026-06")
+
+        assert result[0]["category"] == "LOAN_PAYMENT"
+        assert result[0]["actual_spend"] == 3400.75
+        assert abs(result[0]["remaining"] - 599.25) < 0.01
+
+    def test_apply_rules_skips_manually_overridden_transactions(self, mock_db):
+        """Rules must not clobber a transaction that already has a manual override."""
+        with patch("db.list_category_rules") as mock_rules:
+            mock_rules.return_value = [
+                {
+                    "id": 1,
+                    "match_field": "merchant_name",
+                    "match_pattern": "ACH Transfer",
+                    "category": "TRANSFER_OUT",
+                    "priority": 0,
+                }
+            ]
+            mock_db.fetchall.return_value = []
+            analytics.apply_rules(dry_run=False)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "NOT EXISTS" in sql
+
+    def test_resolve_category_manual_override_wins_over_plaid(self):
+        """Manual override takes priority — regardless of what Plaid returned."""
+        txn = make_txn(transaction_id="txn_1", personal_finance_category="TRANSFER_OUT")
+        with patch("analytics.effective_category", return_value="LOAN_PAYMENT"):
+            result = analytics.resolve_category(txn)
+        assert result == "LOAN_PAYMENT"
+        assert result != "TRANSFER_OUT"
+
 
 class TestMonthlySummary:
     """Phase 2: monthly_summary()"""
