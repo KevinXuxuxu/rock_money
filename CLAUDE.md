@@ -41,6 +41,8 @@ Four tables: `items` (one per linked institution, stores access token) → `acco
 
 **Amount convention**: positive = debit (money out), negative = credit (money in) — matches Plaid's raw values.
 
+**Schema migrations**: `init` uses `CREATE TABLE IF NOT EXISTS` throughout — safe to re-run, but it does not migrate. New tables in `schema.sql` are created automatically on re-init; new columns on existing tables are silently ignored. When adding a column to an existing table, run the `ALTER TABLE` manually via psql in addition to updating `schema.sql`.
+
 ## Environment
 
 Copy `.env.example` to `.env`. Required vars: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` (`sandbox` or `production`), `DATABASE_URL`. Optional: `PLAID_REDIRECT_URI` (HTTPS URL for OAuth institutions in production — use ngrok locally).
