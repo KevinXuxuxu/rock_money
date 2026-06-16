@@ -1,5 +1,6 @@
 """Tests for sync.py — focus on auto-rule-apply behaviour added after sync_all."""
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,7 +35,7 @@ class TestSyncAllRuleApplication:
         mock_rules.return_value = [{"id": 1, "match_pattern": "Netflix"}]
         mock_db.fetchone.return_value = ("access-token-xyz",)
 
-        sync.sync_all(verbose=False)
+        sync.sync_all()
 
         mock_apply.assert_called_once_with(dry_run=False)
 
@@ -49,7 +50,7 @@ class TestSyncAllRuleApplication:
         mock_rules.return_value = []
         mock_db.fetchone.return_value = ("access-token-xyz",)
 
-        sync.sync_all(verbose=False)
+        sync.sync_all()
 
         mock_apply.assert_not_called()
 
@@ -62,7 +63,7 @@ class TestSyncAllRuleApplication:
     ):
         mock_items.return_value = []
 
-        sync.sync_all(verbose=False)
+        sync.sync_all()
 
         mock_sync_item.assert_not_called()
         mock_apply.assert_not_called()
@@ -71,36 +72,36 @@ class TestSyncAllRuleApplication:
     @patch("sync.sync_item")
     @patch("db.list_category_rules")
     @patch("db.list_items")
-    def test_verbose_prints_categorised_count(
-        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_db, capsys
+    def test_logs_categorised_count(
+        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_db, caplog
     ):
         mock_items.return_value = [{"item_id": "item_1", "institution_name": "Chase"}]
         mock_rules.return_value = [{"id": 1}]
         mock_db.fetchone.return_value = ("access-token-xyz",)
         mock_apply.return_value = [{"transaction_id": "t1"}, {"transaction_id": "t2"}]
 
-        sync.sync_all(verbose=True)
+        with caplog.at_level(logging.INFO, logger="sync"):
+            sync.sync_all()
 
-        out = capsys.readouterr().out
-        assert "1 rule" in out
-        assert "Categorised 2" in out
+        assert "1 rule" in caplog.text
+        assert "Categorised 2" in caplog.text
 
     @patch("analytics.apply_rules")
     @patch("sync.sync_item")
     @patch("db.list_category_rules")
     @patch("db.list_items")
-    def test_verbose_silent_when_no_matches(
-        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_db, capsys
+    def test_no_categorised_log_when_no_matches(
+        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_db, caplog
     ):
         mock_items.return_value = [{"item_id": "item_1", "institution_name": "Chase"}]
         mock_rules.return_value = [{"id": 1}]
         mock_db.fetchone.return_value = ("access-token-xyz",)
         mock_apply.return_value = []
 
-        sync.sync_all(verbose=True)
+        with caplog.at_level(logging.INFO, logger="sync"):
+            sync.sync_all()
 
-        out = capsys.readouterr().out
-        assert "Categorised" not in out
+        assert "Categorised" not in caplog.text
 
     @patch("analytics.apply_rules")
     @patch("sync.sync_item")
@@ -118,6 +119,23 @@ class TestSyncAllRuleApplication:
         mock_db.fetchone.return_value = ("access-token-xyz",)
         mock_sync_item.side_effect = [Exception("Plaid error"), None]
 
-        sync.sync_all(verbose=False)
+        sync.sync_all()
 
         mock_apply.assert_called_once_with(dry_run=False)
+
+    @patch("analytics.apply_rules")
+    @patch("sync.sync_item")
+    @patch("db.list_category_rules")
+    @patch("db.list_items")
+    def test_logs_sync_complete(
+        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_db, caplog
+    ):
+        mock_items.return_value = [{"item_id": "item_1", "institution_name": "Chase"}]
+        mock_rules.return_value = []
+        mock_db.fetchone.return_value = ("access-token-xyz",)
+
+        with caplog.at_level(logging.INFO, logger="sync"):
+            sync.sync_all()
+
+        assert "Sync complete" in caplog.text
+        assert "Chase" in caplog.text
