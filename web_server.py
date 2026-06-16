@@ -108,7 +108,7 @@ def remove_item(item_id):
 @app.post("/accounts/sync")
 def sync_accounts():
     try:
-        sync_mod.sync_all(verbose=False)
+        sync_mod.sync_all()
         flash("Sync complete.", "success")
     except Exception as exc:
         _log.error("sync failed: %s", exc)

@@ -123,7 +123,7 @@ class TestSyncAccounts:
         resp = client.post("/accounts/sync")
         assert resp.status_code == 302
         assert "/accounts" in resp.headers["Location"]
-        mock_sync.assert_called_once_with(verbose=False)
+        mock_sync.assert_called_once_with()
 
     @patch("analytics.get_accounts")
     @patch("sync.sync_all")

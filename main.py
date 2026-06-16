@@ -25,9 +25,14 @@ def cmd_link(args):
 
 def cmd_sync(args):
     """Sync transactions for all linked accounts."""
+    import logging
     import sync
 
-    sync.sync_all(verbose=not args.quiet)
+    logging.basicConfig(
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        level=logging.WARNING if args.quiet else logging.INFO,
+    )
+    sync.sync_all()
 
 
 def cmd_list_items(args):
