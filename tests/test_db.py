@@ -3,6 +3,49 @@
 import db
 
 
+class TestItems:
+    """get_item, delete_item"""
+
+    def test_get_item_returns_row(self, mock_db):
+        mock_db.fetchone.return_value = {
+            "item_id": "item_1",
+            "access_token": "tok_abc",
+            "institution_name": "Chase",
+        }
+        result = db.get_item("item_1")
+        assert result["item_id"] == "item_1"
+        assert result["access_token"] == "tok_abc"
+
+    def test_get_item_returns_none_when_not_found(self, mock_db):
+        mock_db.fetchone.return_value = None
+        assert db.get_item("item_nope") is None
+
+    def test_get_item_queries_by_item_id(self, mock_db):
+        mock_db.fetchone.return_value = None
+        db.get_item("item_xyz")
+        sql = mock_db.execute.call_args[0][0]
+        params = mock_db.execute.call_args[0][1]
+        assert "FROM items" in sql
+        assert "item_id = %s" in sql
+        assert params == ("item_xyz",)
+
+    def test_delete_item_returns_true_when_found(self, mock_db):
+        mock_db.rowcount = 1
+        assert db.delete_item("item_1") is True
+
+    def test_delete_item_returns_false_when_not_found(self, mock_db):
+        mock_db.rowcount = 0
+        assert db.delete_item("item_nope") is False
+
+    def test_delete_item_deletes_from_items_table(self, mock_db):
+        mock_db.rowcount = 1
+        db.delete_item("item_1")
+        sql = mock_db.execute.call_args[0][0]
+        params = mock_db.execute.call_args[0][1]
+        assert "DELETE FROM items" in sql
+        assert params == ("item_1",)
+
+
 class TestCategoryOverrides:
     """upsert_category_override, delete_category_override, get_category_override"""
 

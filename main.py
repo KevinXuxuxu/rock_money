@@ -448,6 +448,48 @@ def cmd_detect_transfers(args):
         )
 
 
+def cmd_remove_item(args):
+    """Revoke a linked institution and delete all its data."""
+    import db
+    from plaid_client import PlaidClient
+
+    item = db.get_item(args.item_id)
+    if not item:
+        print(f"No item found with ID {args.item_id}.")
+        return
+
+    name = item.get("institution_name") or args.item_id
+    print(f"Institution:  {name}")
+    print(f"Item ID:      {args.item_id}")
+    print(
+        "This will permanently delete all accounts, transactions, overrides, notes, "
+        "tags, and rules associated with this item."
+    )
+    answer = input("Type 'yes' to confirm: ").strip().lower()
+    if answer != "yes":
+        print("Aborted.")
+        return
+
+    import os
+
+    if os.environ.get("PLAID_SKIP_REVOKE"):
+        print("PLAID_SKIP_REVOKE set — skipping Plaid revoke.")
+    else:
+        try:
+            PlaidClient().remove_item(item["access_token"])
+            print("Plaid access token revoked.")
+        except Exception as exc:
+            print(
+                f"Warning: Plaid revoke failed ({exc}). Proceeding with local delete."
+            )
+
+    deleted = db.delete_item(args.item_id)
+    if deleted:
+        print(f"Deleted '{name}' and all associated data.")
+    else:
+        print("Item not found in DB (already deleted?).")
+
+
 def cmd_rule_apply(args):
     """Apply rules to all un-categorized transactions."""
     import analytics
@@ -690,6 +732,14 @@ def main():
     # list-items
     p_list = sub.add_parser("list-items", help="List all linked institutions")
     p_list.set_defaults(func=cmd_list_items)
+
+    # remove-item
+    p_rem = sub.add_parser(
+        "remove-item",
+        help="Revoke a linked institution and delete all its data",
+    )
+    p_rem.add_argument("item_id", type=str, help="Item ID (from list-items)")
+    p_rem.set_defaults(func=cmd_remove_item)
 
     args = parser.parse_args()
     try:

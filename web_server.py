@@ -86,6 +86,25 @@ def accounts_page():
     return render_template("accounts.html", accounts=accounts)
 
 
+@app.post("/accounts/items/<item_id>/remove")
+def remove_item(item_id):
+    item = db.get_item(item_id)
+    if not item:
+        flash("Institution not found.", "error")
+        return redirect(url_for("accounts_page"))
+    name = item.get("institution_name") or item_id
+    if os.environ.get("PLAID_SKIP_REVOKE"):
+        _log.info("PLAID_SKIP_REVOKE set — skipping Plaid revoke for %s", item_id)
+    else:
+        try:
+            _get_plaid().remove_item(item["access_token"])
+        except Exception as exc:
+            _log.warning("Plaid revoke failed for %s: %s", item_id, exc)
+    db.delete_item(item_id)
+    flash(f"Removed '{name}' and all associated data.", "success")
+    return redirect(url_for("accounts_page"))
+
+
 @app.post("/accounts/sync")
 def sync_accounts():
     try:

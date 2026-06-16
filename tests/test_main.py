@@ -378,6 +378,88 @@ class TestBudgetCommands:
         assert "No categories" in out
 
 
+class TestRemoveItemCommand:
+    """remove-item: Plaid revoke + DB delete with confirmation."""
+
+    @patch("db.get_item")
+    def test_item_not_found(self, mock_get, capsys):
+        mock_get.return_value = None
+        from argparse import Namespace
+
+        main.cmd_remove_item(Namespace(item_id="item_nope"))
+        out = capsys.readouterr().out
+        assert "No item found" in out
+
+    @patch("db.delete_item")
+    @patch("plaid_client.PlaidClient")
+    @patch("db.get_item")
+    @patch("builtins.input", return_value="no")
+    def test_aborts_when_not_confirmed(
+        self, mock_input, mock_get, mock_plaid_cls, mock_delete, capsys
+    ):
+        mock_get.return_value = {
+            "item_id": "item_1",
+            "access_token": "tok_123",
+            "institution_name": "Chase",
+        }
+        from argparse import Namespace
+
+        main.cmd_remove_item(Namespace(item_id="item_1"))
+        out = capsys.readouterr().out
+        assert "Aborted" in out
+        mock_delete.assert_not_called()
+
+    @patch.dict("os.environ", {"PLAID_SKIP_REVOKE": ""})
+    @patch("db.delete_item")
+    @patch("plaid_client.PlaidClient")
+    @patch("db.get_item")
+    @patch("builtins.input", return_value="yes")
+    def test_revokes_plaid_and_deletes_db_on_confirm(
+        self, mock_input, mock_get, mock_plaid_cls, mock_delete, capsys
+    ):
+        mock_get.return_value = {
+            "item_id": "item_1",
+            "access_token": "tok_123",
+            "institution_name": "Chase",
+        }
+        mock_delete.return_value = True
+
+        from argparse import Namespace
+
+        main.cmd_remove_item(Namespace(item_id="item_1"))
+        out = capsys.readouterr().out
+
+        mock_plaid_cls.return_value.remove_item.assert_called_once_with("tok_123")
+        mock_delete.assert_called_once_with("item_1")
+        assert "Chase" in out
+        assert "revoked" in out.lower() or "deleted" in out.lower()
+
+    @patch.dict("os.environ", {"PLAID_SKIP_REVOKE": ""})
+    @patch("db.delete_item")
+    @patch("plaid_client.PlaidClient")
+    @patch("db.get_item")
+    @patch("builtins.input", return_value="yes")
+    def test_plaid_failure_still_deletes_locally(
+        self, mock_input, mock_get, mock_plaid_cls, mock_delete, capsys
+    ):
+        mock_get.return_value = {
+            "item_id": "item_1",
+            "access_token": "tok_123",
+            "institution_name": "Chase",
+        }
+        mock_plaid_cls.return_value.remove_item.side_effect = Exception("network error")
+        mock_delete.return_value = True
+
+        from argparse import Namespace
+
+        main.cmd_remove_item(Namespace(item_id="item_1"))
+        out = capsys.readouterr().out
+
+        mock_delete.assert_called_once_with("item_1")
+        assert "Warning" in out or "failed" in out.lower()
+        assert "Deleted" in out
+
+
 class TestCategoryCommands:
     """Phase 3: categorize, uncategorize, rule-* commands"""
 
