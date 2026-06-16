@@ -10,6 +10,7 @@ from plaid.model.item_public_token_exchange_request import (
 )
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
+from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.country_code import CountryCode
 from plaid.model.products import Products
@@ -82,6 +83,10 @@ class PlaidClient:
             return institution_id, inst_resp["institution"]["name"]
         except Exception:
             return None, None
+
+    def remove_item(self, access_token: str) -> None:
+        """Revoke an access token with Plaid (item/remove)."""
+        self._client.item_remove(ItemRemoveRequest(access_token=access_token))
 
     # ── Transactions sync ─────────────────────────────────────────────────────
 

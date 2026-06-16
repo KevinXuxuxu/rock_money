@@ -435,6 +435,25 @@ def list_views() -> list[dict]:
             return [dict(row) for row in cur.fetchall()]
 
 
+def get_item(item_id: str) -> dict | None:
+    with get_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT item_id, access_token, institution_name FROM items WHERE item_id = %s",
+                (item_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+
+def delete_item(item_id: str) -> bool:
+    """Delete an item and all cascade data (accounts, transactions, overrides, etc.)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM items WHERE item_id = %s", (item_id,))
+            return cur.rowcount > 0
+
+
 def delete_transactions(transaction_ids: list[str]) -> int:
     if not transaction_ids:
         return 0

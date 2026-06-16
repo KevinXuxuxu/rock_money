@@ -32,7 +32,6 @@
         <thead>
           <tr>
             <th>Account</th>
-            <th>Institution</th>
             <th>Type</th>
             <th>Mask</th>
             <th class="num">Transactions</th>
@@ -41,21 +40,39 @@
           </tr>
         </thead>
         <tbody>
-          {% for a in accounts %}
+          {% for item_id, group in accounts | groupby("item_id") %}
+          {% set group = group | list %}
+          {% set inst_name = group[0].institution_name or item_id %}
+          <tr style="background:var(--bg)">
+            <td colspan="5" style="padding:10px 12px;font-weight:600;font-size:13px;color:var(--muted)">
+              {{ inst_name }}
+            </td>
+            <td style="padding:6px 12px;text-align:right">
+              <form method="post" action="/accounts/items/{{ item_id }}/remove"
+                    onsubmit="return confirm('Remove {{ inst_name }}?\n\nThis will permanently delete all {{ group|length }} account(s) and every transaction, override, note, and tag associated with this institution. This cannot be undone.')">
+                <button type="submit"
+                        style="background:none;border:1px solid #c0392b;color:#c0392b;border-radius:6px;
+                               padding:3px 10px;font-size:12px;cursor:pointer;white-space:nowrap">
+                  Remove institution
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% for a in group %}
           <tr>
-            <td>
+            <td style="padding-left:24px">
               <div style="font-weight:500">{{ a.name }}</div>
               {% if a.official_name and a.official_name != a.name %}
               <div class="muted" style="font-size:12px">{{ a.official_name }}</div>
               {% endif %}
             </td>
-            <td>{{ a.institution_name or '—' }}</td>
             <td>{{ a.subtype or a.type }}</td>
             <td class="mono">{{ a.mask or '—' }}</td>
             <td class="num">{{ a.txn_count }}</td>
             <td class="num debit">{{ a.total_debits|money }}</td>
             <td class="num credit">{{ a.total_credits|money }}</td>
           </tr>
+          {% endfor %}
           {% endfor %}
         </tbody>
       </table>
