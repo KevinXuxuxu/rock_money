@@ -51,13 +51,19 @@ def dashboard():
     accounts = analytics.get_accounts()
     recent_txns = analytics.get_transactions(limit=10)
     spend = analytics.spend_by_category(month)
+    income = analytics.income_by_category(month)
     summary = analytics.monthly_summary(months=6)
 
     max_spend = float(max((r["total_spend"] for r in spend), default=1) or 1)
     for r in spend:
         r["pct"] = float(r["total_spend"]) / max_spend * 100
 
+    max_income = float(max((r["total_income"] for r in income), default=1) or 1)
+    for r in income:
+        r["pct"] = float(r["total_income"]) / max_income * 100
+
     total_spend = sum(float(r["total_spend"]) for r in spend)
+    total_income = sum(float(r["total_income"]) for r in income)
     current_net = float(summary[-1]["net"]) if summary else 0.0
 
     return render_template(
@@ -65,9 +71,11 @@ def dashboard():
         accounts=accounts,
         recent_txns=recent_txns,
         spend=spend,
+        income=income,
         summary=summary,
         month=month,
         total_spend=total_spend,
+        total_income=total_income,
         current_net=current_net,
     )
 
@@ -175,16 +183,22 @@ def reports_page():
 
     summary = analytics.monthly_summary(months=months)
     spend = analytics.spend_by_category(month)
+    income = analytics.income_by_category(month)
     budgets = analytics.budget_status(month)
 
     max_spend = float(max((r["total_spend"] for r in spend), default=1) or 1)
     for r in spend:
         r["pct"] = float(r["total_spend"]) / max_spend * 100
 
+    max_income = float(max((r["total_income"] for r in income), default=1) or 1)
+    for r in income:
+        r["pct"] = float(r["total_income"]) / max_income * 100
+
     return render_template(
         "reports.html",
         summary=summary,
         spend=spend,
+        income=income,
         budgets=budgets,
         month=month,
         months=months,
