@@ -116,6 +116,38 @@ def spend_by_category(month: str) -> list[dict]:
             return [dict(row) for row in cur.fetchall()]
 
 
+def income_by_category(month: str) -> list[dict]:
+    """
+    Return income (credits) summed by effective category for a given month.
+    Amounts are returned as positive numbers (negated from raw negative values).
+
+    Args:
+        month: YYYY-MM — e.g. '2026-06'
+    """
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT COALESCE(co.category, t.personal_finance_category) AS category,
+                       SUM(-t.amount) AS total_income,
+                       COUNT(*)       AS txn_count
+                FROM transactions t
+                LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                WHERE t.pending = FALSE
+                  AND t.amount < 0
+                  AND date_trunc('month', t.date) = %s::date
+                  AND COALESCE(co.category, t.personal_finance_category)
+                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                GROUP BY COALESCE(co.category, t.personal_finance_category)
+                ORDER BY total_income DESC
+            """,
+                (f"{month}-01",),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
 def monthly_summary(months: int = 12) -> list[dict]:
     """
     Return month-over-month income, spend, and net summary.

@@ -16,19 +16,19 @@
       <div class="stat-val debit">{{ total_spend|money }}</div>
     </div>
     <div class="card">
+      <div class="stat-label">Income this month</div>
+      <div class="stat-val credit">{{ total_income|money }}</div>
+    </div>
+    <div class="card">
       <div class="stat-label">Net this month</div>
       <div class="stat-val {{ 'credit' if current_net >= 0 else 'debit' }}">
         {{ current_net|money }}
       </div>
     </div>
-    <div class="card">
-      <div class="stat-label">Recent transactions</div>
-      <div class="stat-val">{{ recent_txns|length }}</div>
-    </div>
   </div>
 </section>
 
-<!-- Spend by category chart -->
+<!-- Spend and income by category -->
 <section>
   <div class="row">
     <div class="card">
@@ -52,8 +52,32 @@
       {% endif %}
     </div>
 
-    <!-- 6-month trend -->
     <div class="card">
+      <h3>Income by category — {{ month }}</h3>
+      {% if income %}
+        <div class="bar-chart">
+          {% for row in income[:10] %}
+          <div class="bar-row">
+            <span class="bar-label" title="{{ row.category or 'Uncategorized' }}">
+              {{ (row.category or 'Uncategorized')[:26] }}
+            </span>
+            <div class="bar-track">
+              <div class="bar-fill" style="width:{{ row.pct|int }}%;background:var(--green)"></div>
+            </div>
+            <span class="bar-amount credit">{{ row.total_income|money }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="empty">No income data for {{ month }}.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<!-- 6-month trend -->
+<section>
+  <div class="card">
       <h3>6-month summary</h3>
       {% if summary %}
       <div class="table-wrap">
@@ -82,7 +106,6 @@
         <div class="empty">No data yet.</div>
       {% endif %}
     </div>
-  </div>
 </section>
 
 <!-- Recent transactions -->
