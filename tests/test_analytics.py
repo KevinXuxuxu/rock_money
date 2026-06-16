@@ -637,14 +637,6 @@ class TestDetectInternalTransfers:
         assert pairs == []
         mock_upsert.assert_not_called()
 
-    def test_sql_filters_transfer_plaid_categories(self, mock_db):
-        mock_db.fetchall.return_value = []
-
-        analytics.detect_internal_transfers(dry_run=True)
-
-        sql = mock_db.execute.call_args[0][0]
-        assert "TRANSFER_IN" in sql and "TRANSFER_OUT" in sql
-
     def test_sql_excludes_already_overridden_transactions(self, mock_db):
         """Must not clobber manual overrides."""
         mock_db.fetchall.return_value = []
@@ -732,13 +724,41 @@ class TestDetectInternalTransfers:
         assert pairs == []
         assert mock_upsert.call_count == 2  # no new writes
 
+    def test_pair_detected_regardless_of_plaid_category(self, mock_db):
+        """Plaid may miscategorize one leg (e.g. GENERAL_MERCHANDISE) — the transfer
+        ID match must still work regardless of what Plaid assigned to either leg."""
+        mock_db.fetchall.return_value = [
+            {
+                "transaction_id": "txn_citi_out",
+                "amount": 1000.00,
+                "name": "Iitcitdsyaub7fw",  # Plaid: GENERAL_MERCHANDISE in prod
+                "merchant_name": None,
+                "account_name": "Citi Checking",
+            },
+            {
+                "transaction_id": "txn_citi_in",
+                "amount": -1000.00,
+                "name": "IIT CITIBANK CITIXFR IITCITDSYAUB7FW WEB ID: 8264624602",
+                "merchant_name": None,
+                "account_name": "Chase Checking",
+            },
+        ]
+
+        pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert {pairs[0]["txn_id_a"], pairs[0]["txn_id_b"]} == {
+            "txn_citi_out",
+            "txn_citi_in",
+        }
+
     def test_citi_real_name_formats(self, mock_db):
         """Real Citi cross-bank transfer names seen in production."""
         mock_db.fetchall.return_value = [
             {
                 "transaction_id": "txn_citi_out",
                 "amount": 1000.00,
-                "name": "Ach Electronic Debit - Iitcitdsyaub7fw",
+                "name": "Iitcitdsyaub7fw",
                 "merchant_name": None,
                 "account_name": "Citi Checking",
             },

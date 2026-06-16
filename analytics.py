@@ -309,8 +309,7 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
                        a.name AS account_name
                 FROM transactions t
                 JOIN accounts a ON a.account_id = t.account_id
-                WHERE t.personal_finance_category IN ('TRANSFER_IN', 'TRANSFER_OUT')
-                  AND NOT EXISTS (
+                WHERE NOT EXISTS (
                       SELECT 1 FROM category_overrides
                       WHERE transaction_id = t.transaction_id
                   )
