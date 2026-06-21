@@ -132,7 +132,8 @@
           <tr>
             <td class="muted">{{ t.date }}</td>
             <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
-            <td{% if t.pending %} class="muted" title="Pending"{% endif %}>
+            <td class="merchant{% if t.pending %} muted{% endif %}"
+                title="{{ t.merchant_name or t.name or '' }}{% if t.pending %} (pending){% endif %}">
               {{ t.merchant_name or t.name or '—' }}
             </td>
             <td class="muted">{{ t.account_name or '—' }}</td>

@@ -101,10 +101,10 @@
           <tr>
             <td class="muted">{{ t.date }}</td>
             <td class="num {{ t.amount|sign_class }}">{{ t.amount|fmt_amount }}</td>
-            <td>
+            <td class="merchant">
               <a href="/transactions/{{ t.transaction_id }}"
                  style="color:{{ 'var(--muted)' if t.pending else 'var(--blue)' }}"
-                 {% if t.pending %}title="Pending"{% endif %}>
+                 title="{{ t.merchant_name or t.name or '' }}{% if t.pending %} (pending){% endif %}">
                 {{ t.merchant_name or t.name or '—' }}
               </a>
             </td>
