@@ -154,7 +154,7 @@ def transactions_page():
     account_id = request.args.get("account") or None
     category = request.args.get("category") or None
     month = request.args.get("month") or None
-    pending = request.args.get("pending") == "1"
+    pending_only = request.args.get("pending") == "1"
     limit = min(int(request.args.get("limit", 100)), 500)
 
     txns = analytics.get_transactions(
@@ -163,7 +163,7 @@ def transactions_page():
         account_id=account_id,
         category=category,
         month=month,
-        pending=pending,
+        pending_only=pending_only,
     )
     accounts = analytics.get_accounts()
     categories = analytics.get_categories()
@@ -184,7 +184,7 @@ def transactions_page():
             "account": account_id or "",
             "category": category or "",
             "month": month or "",
-            "pending": "1" if pending else "",
+            "pending": "1" if pending_only else "",
             "limit": limit,
         },
     )
