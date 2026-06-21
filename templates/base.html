@@ -63,6 +63,10 @@
     td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 14px;
          white-space: nowrap; }
     tr:last-child td { border-bottom: none; }
+    /* Merchant column: cap width and ellipsis-truncate long names (full text in title). */
+    td.merchant { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+    td.merchant a { display: inline-block; max-width: 100%; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
     th.num { text-align: right; }
     .debit  { color: var(--red); }
@@ -156,6 +160,7 @@
       /* Bar chart */
       .bar-label { width: 150px; font-size: 12px; }
       .bar-amount { width: 72px; font-size: 12px; }
+      td.merchant { max-width: 160px; }
       /* Filters: stack vertically, but exclude checkboxes from full-width */
       .filters { flex-direction: column; align-items: stretch; }
       .filters label { width: 100%; }
@@ -171,6 +176,7 @@
       .bar-label { width: 120px; font-size: 11px; }
       .bar-amount { width: 64px; font-size: 11px; }
       td, th { padding: 8px 10px; font-size: 13px; }
+      td.merchant { max-width: 120px; }
     }
   </style>
 </head>
