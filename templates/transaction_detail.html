@@ -6,7 +6,7 @@
   <a href="javascript:history.back()" style="color:var(--muted);font-size:14px">← Back</a>
 </div>
 
-<h2>{{ txn.merchant_name or txn.name }}</h2>
+<h2{% if txn.pending %} style="color:var(--muted)" title="Pending"{% endif %}>{{ txn.merchant_name or txn.name }}</h2>
 <div class="muted" style="margin-top:-12px;margin-bottom:24px;font-size:13px">{{ txn.transaction_id }}</div>
 
 <!-- Info -->
@@ -33,6 +33,10 @@
       <div class="detail-field">
         <label>Payment channel</label>
         <div class="value">{{ txn.payment_channel or '—' }}</div>
+      </div>
+      <div class="detail-field">
+        <label>Status</label>
+        <div class="value">{{ 'Pending' if txn.pending else 'Posted' }}</div>
       </div>
       <div class="detail-field">
         <label>Plaid category</label>

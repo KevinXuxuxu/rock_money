@@ -15,6 +15,17 @@ _log = logging.getLogger(__name__)
 # INTERNAL TRANSFER: detected TRANSFER_IN/OUT pairs between linked accounts.
 INTERNAL_CATEGORIES: frozenset[str] = frozenset({"INTERNAL TRANSFER", "CREDIT PAYMENT"})
 
+# Pending transactions ARE counted in all stats — most of them post unchanged.
+# The one exception is a pending transaction that has already posted under a new
+# id: Plaid links the posted row to the pending one via pending_transaction_id
+# and normally removes the pending row on the next sync. Until that removal
+# lands, this guard excludes any pending row a posted row already points to, so
+# the same spend is never counted twice. Assumes the transactions alias is `t`.
+_NOT_SUPERSEDED = """NOT (t.pending AND EXISTS (
+        SELECT 1 FROM transactions posted
+        WHERE posted.pending_transaction_id = t.transaction_id
+    ))"""
+
 
 def get_transactions(
     *,
@@ -22,24 +33,27 @@ def get_transactions(
     account_id: str | None = None,
     category: str | None = None,
     month: str | None = None,
-    pending: bool = False,
+    pending_only: bool = False,
     q: str | None = None,
 ) -> list[dict]:
     """
     Return recent transactions with account info, newest first.
+
+    Pending transactions are always included (except ones already superseded by a
+    posted row). Use pending_only to narrow to just the pending ones.
 
     Args:
         limit: max rows to return
         account_id: filter to a single account
         category: filter by Plaid personal_finance_category
         month: YYYY-MM — filter to a specific month
-        pending: include pending transactions (excluded by default)
+        pending_only: show only pending transactions
     """
-    conditions = ["1=1"]
+    conditions = [_NOT_SUPERSEDED]
     params: list = []
 
-    if not pending:
-        conditions.append("t.pending = FALSE")
+    if pending_only:
+        conditions.append("t.pending = TRUE")
     if account_id:
         conditions.append("t.account_id = %s")
         params.append(account_id)
@@ -103,7 +117,9 @@ def spend_by_category(month: str) -> list[dict]:
                        COUNT(*)      AS txn_count
                 FROM transactions t
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
-                WHERE t.pending = FALSE
+                WHERE """
+                + _NOT_SUPERSEDED
+                + """
                   AND t.amount > 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
@@ -135,7 +151,9 @@ def income_by_category(month: str) -> list[dict]:
                        COUNT(*)       AS txn_count
                 FROM transactions t
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
-                WHERE t.pending = FALSE
+                WHERE """
+                + _NOT_SUPERSEDED
+                + """
                   AND t.amount < 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
@@ -171,7 +189,9 @@ def monthly_summary(months: int = 12) -> list[dict]:
                            COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS spend
                     FROM transactions t
                     LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
-                    WHERE t.pending = FALSE
+                    WHERE """
+                + _NOT_SUPERSEDED
+                + """
                       AND COALESCE(co.category, t.personal_finance_category)
                           NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
                     GROUP BY date_trunc('month', t.date)
@@ -189,14 +209,18 @@ def get_categories() -> list[str]:
     """Return all distinct effective categories (override > Plaid), sorted."""
     with db.get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT DISTINCT COALESCE(co.category, t.personal_finance_category) AS cat
                 FROM transactions t
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE COALESCE(co.category, t.personal_finance_category) IS NOT NULL
-                  AND t.pending = FALSE
+                  AND """
+                + _NOT_SUPERSEDED
+                + """
                 ORDER BY cat
-            """)
+            """
+            )
             return [row[0] for row in cur.fetchall()]
 
 
@@ -280,19 +304,27 @@ def get_accounts() -> list[dict]:
         import psycopg2.extras
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT a.account_id, a.name, a.official_name, a.type, a.subtype,
                        a.mask, a.item_id, i.institution_name,
-                       COUNT(t.transaction_id) FILTER (WHERE NOT t.pending) AS txn_count,
-                       COALESCE(SUM(t.amount) FILTER (WHERE NOT t.pending), 0) AS total_debits,
-                       COALESCE(SUM(-t.amount) FILTER (WHERE t.amount < 0 AND NOT t.pending), 0) AS total_credits
+                       COUNT(t.transaction_id) FILTER (WHERE """
+                + _NOT_SUPERSEDED
+                + """) AS txn_count,
+                       COALESCE(SUM(t.amount) FILTER (WHERE """
+                + _NOT_SUPERSEDED
+                + """), 0) AS total_debits,
+                       COALESCE(SUM(-t.amount) FILTER (WHERE t.amount < 0 AND """
+                + _NOT_SUPERSEDED
+                + """), 0) AS total_credits
                 FROM accounts a
                 JOIN items i ON i.item_id = a.item_id
                 LEFT JOIN transactions t ON t.account_id = a.account_id
                 GROUP BY a.account_id, a.name, a.official_name, a.type, a.subtype,
                          a.mask, a.item_id, i.institution_name
                 ORDER BY i.institution_name, a.name
-            """)
+            """
+            )
             return [dict(row) for row in cur.fetchall()]
 
 

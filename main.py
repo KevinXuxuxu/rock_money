@@ -89,7 +89,7 @@ def cmd_list_txns(args):
     if args.month:
         kwargs["month"] = args.month
     if args.pending:
-        kwargs["pending"] = True
+        kwargs["pending_only"] = True
     if getattr(args, "search", None):
         kwargs["q"] = args.search
 
@@ -571,7 +571,7 @@ def main():
     )
     p_txns.add_argument("--month", type=str, help="Filter to month YYYY-MM")
     p_txns.add_argument(
-        "--pending", action="store_true", help="Include pending transactions"
+        "--pending", action="store_true", help="Show only pending transactions"
     )
     p_txns.add_argument(
         "--search", type=str, help="Full-text search (name, merchant, note)"

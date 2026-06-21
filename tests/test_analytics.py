@@ -21,24 +21,27 @@ class TestGetTransactions:
         assert result[0]["transaction_id"] == "t1"
         assert result[1]["transaction_id"] == "t2"
 
-    def test_excludes_pending_by_default(self, mock_db):
-        """Verify the SQL includes 'pending = FALSE'."""
+    def test_includes_pending_by_default(self, mock_db):
+        """Pending txns are included by default; only superseded ones are excluded."""
         mock_db.fetchall.return_value = []
 
         analytics.get_transactions()
 
         sql = mock_db.execute.call_args[0][0]
-        assert "t.pending = FALSE" in sql
+        assert "t.pending = FALSE" not in sql
+        assert "t.pending = TRUE" not in sql
+        # The superseded-pending guard is always present.
+        assert "pending_transaction_id = t.transaction_id" in sql
 
-    def test_includes_pending_when_requested(self, mock_db):
+    def test_pending_only_filters_to_pending(self, mock_db):
         mock_db.fetchall.return_value = [
             make_txn(pending=True),
         ]
 
-        analytics.get_transactions(pending=True)
+        analytics.get_transactions(pending_only=True)
 
         sql = mock_db.execute.call_args[0][0]
-        assert "t.pending = FALSE" not in sql
+        assert "t.pending = TRUE" in sql
 
     def test_filters_by_account(self, mock_db):
         mock_db.fetchall.return_value = []

@@ -64,7 +64,7 @@ class TestCliSmoke:
         assert call_kwargs["account_id"] == "acct_x"
         assert call_kwargs["category"] == "INCOME"
         assert call_kwargs["month"] == "2026-06"
-        assert call_kwargs["pending"] is True
+        assert call_kwargs["pending_only"] is True
 
     @patch("analytics.get_transactions")
     def test_cmd_list_txns_formats_credit_amounts(self, mock_get, capsys):
