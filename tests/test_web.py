@@ -232,6 +232,23 @@ class TestTransactionsPage:
     @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
+    def test_shows_net_sum_of_displayed(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        """Header shows the net total of the displayed rows (debits + credits)."""
+        mock_accts.return_value = []
+        # 100.00 debit + (-25.50) credit = 74.50 net.
+        mock_txns.return_value = [make_txn(amount=100.00), make_txn(amount=-25.50)]
+        mock_cats.return_value = []
+        mock_views.return_value = []
+        resp = client.get("/transactions")
+        assert b"net" in resp.data
+        assert b"$74.50" in resp.data
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
     def test_filter_params_passed_through(
         self, mock_txns, mock_accts, mock_cats, mock_views, client
     ):

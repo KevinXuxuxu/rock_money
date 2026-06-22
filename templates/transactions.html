@@ -81,8 +81,10 @@
 <section>
   <div class="card">
     {% if txns %}
+    {% set net = txns|sum(attribute='amount') %}
     <div style="color:var(--muted);font-size:13px;margin-bottom:14px">
       Showing {{ txns|length }} transaction{{ 's' if txns|length != 1 }}
+      · net <strong class="{{ net|sign_class }}">{{ net|fmt_amount }}</strong>
     </div>
     <div class="table-wrap">
       <table>
