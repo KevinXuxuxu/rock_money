@@ -59,9 +59,14 @@
         <div class="bar-chart">
           {% for row in spend[:12] %}
           <div class="bar-row">
-            <span class="bar-label" title="{{ row.category or 'Uncategorized' }}">
-              {{ (row.category or 'Uncategorized')[:26] }}
-            </span>
+            {% if row.category %}
+            <a class="bar-label" href="/transactions?month={{ month }}&amp;category={{ row.category|urlencode }}"
+               title="View {{ row.category }} transactions for {{ month_label }}">
+              {{ row.category[:26] }}
+            </a>
+            {% else %}
+            <span class="bar-label" title="Uncategorized">Uncategorized</span>
+            {% endif %}
             <div class="bar-track">
               <div class="bar-fill" style="width:{{ row.pct|int }}%"></div>
             </div>
@@ -82,9 +87,14 @@
         <div class="bar-chart">
           {% for row in income[:12] %}
           <div class="bar-row">
-            <span class="bar-label" title="{{ row.category or 'Uncategorized' }}">
-              {{ (row.category or 'Uncategorized')[:26] }}
-            </span>
+            {% if row.category %}
+            <a class="bar-label" href="/transactions?month={{ month }}&amp;category={{ row.category|urlencode }}"
+               title="View {{ row.category }} transactions for {{ month_label }}">
+              {{ row.category[:26] }}
+            </a>
+            {% else %}
+            <span class="bar-label" title="Uncategorized">Uncategorized</span>
+            {% endif %}
             <div class="bar-track">
               <div class="bar-fill" style="width:{{ row.pct|int }}%;background:var(--green)"></div>
             </div>

@@ -600,6 +600,31 @@ class TestReportsPage:
         called_month = mock_spend.call_args.args[0]
         assert called_month == "2026-03"
 
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_categories_link_to_filtered_transactions(
+        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+    ):
+        """Spend and income categories link to transactions filtered by month + category."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows()
+        mock_budgets.return_value = []
+        mock_income.return_value = [
+            {"category": "INCOME_WAGES", "total_income": 5000.0, "txn_count": 1}
+        ]
+
+        resp = client.get("/reports?month=2026-05")
+
+        assert (
+            b'href="/transactions?month=2026-05&amp;category=FOOD_AND_DRINK"'
+            in resp.data
+        )
+        assert (
+            b'href="/transactions?month=2026-05&amp;category=INCOME_WAGES"' in resp.data
+        )
+
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
