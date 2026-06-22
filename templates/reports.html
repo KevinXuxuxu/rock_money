@@ -4,25 +4,23 @@
 {% block content %}
 <h2>Reports</h2>
 
-<!-- Month selector -->
+<!-- Month navigation (drives spend, income & budgets) -->
 <section>
-  <form class="filters" method="get" action="/reports">
-    <label>
-      Month (for spend &amp; budgets)
-      <input type="month" name="month" value="{{ month }}">
-    </label>
-    <label>
-      Months of history
-      <input type="number" name="months" value="{{ months }}" min="1" max="60" style="width:80px">
-    </label>
-    <button type="submit">Update</button>
-  </form>
+  <div class="month-nav">
+    <a class="month-arrow" href="/reports?month={{ prev_month }}" title="Previous month" aria-label="Previous month">‹</a>
+    <span class="month-current">{{ month_label }}</span>
+    {% if is_current %}
+    <span class="month-arrow disabled" aria-disabled="true" title="No future data">›</span>
+    {% else %}
+    <a class="month-arrow" href="/reports?month={{ next_month }}" title="Next month" aria-label="Next month">›</a>
+    {% endif %}
+  </div>
 </section>
 
 <!-- Monthly cash flow -->
 <section>
   <div class="card">
-    <h3>Monthly cash flow</h3>
+    <h3>Monthly cash flow — last 6 months</h3>
     {% if summary %}
     <div class="table-wrap">
       <table>
@@ -56,7 +54,7 @@
 <div class="row">
   <section>
     <div class="card">
-      <h3>Spend by category — {{ month }}</h3>
+      <h3>Spend by category — {{ month_label }}</h3>
       {% if spend %}
         <div class="bar-chart">
           {% for row in spend[:12] %}
@@ -72,14 +70,14 @@
           {% endfor %}
         </div>
       {% else %}
-        <div class="empty">No spending data for {{ month }}.</div>
+        <div class="empty">No spending data for {{ month_label }}.</div>
       {% endif %}
     </div>
   </section>
 
   <section>
     <div class="card">
-      <h3>Income by category — {{ month }}</h3>
+      <h3>Income by category — {{ month_label }}</h3>
       {% if income %}
         <div class="bar-chart">
           {% for row in income[:12] %}
@@ -95,7 +93,7 @@
           {% endfor %}
         </div>
       {% else %}
-        <div class="empty">No income data for {{ month }}.</div>
+        <div class="empty">No income data for {{ month_label }}.</div>
       {% endif %}
     </div>
   </section>
@@ -104,7 +102,7 @@
 <!-- Budget status -->
 <section>
   <div class="card">
-    <h3>Budget status — {{ month }}</h3>
+    <h3>Budget status — {{ month_label }}</h3>
       {% if budgets %}
       <div class="table-wrap">
         <table>
