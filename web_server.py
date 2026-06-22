@@ -2,7 +2,7 @@
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
@@ -197,10 +197,20 @@ def search_page():
 
 @app.get("/reports")
 def reports_page():
-    months = int(request.args.get("months", 12))
-    month = request.args.get("month") or datetime.now().strftime("%Y-%m")
+    this_month = datetime.now().strftime("%Y-%m")
+    month = request.args.get("month") or this_month
+    # Clamp to the current month — there's no data in the future.
+    if month > this_month:
+        month = this_month
+    cur = datetime.strptime(month, "%Y-%m")
 
-    summary = analytics.monthly_summary(months=months)
+    prev_m = (cur.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    next_dt = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
+    next_m = next_dt.strftime("%Y-%m")
+    is_current = month >= this_month
+    month_label = cur.strftime("%B %Y")
+
+    summary = analytics.monthly_summary(months=6)
     spend = analytics.spend_by_category(month)
     income = analytics.income_by_category(month)
     budgets = analytics.budget_status(month)
@@ -220,7 +230,10 @@ def reports_page():
         income=income,
         budgets=budgets,
         month=month,
-        months=months,
+        month_label=month_label,
+        prev_month=prev_m,
+        next_month=next_m,
+        is_current=is_current,
     )
 
 
