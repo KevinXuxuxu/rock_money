@@ -1082,20 +1082,119 @@ class TestDetectInternalTransfers:
         assert len(pairs) == 2
         assert mock_upsert.call_count == 4
 
-    def test_idempotent_second_run_is_noop(self, mock_db):
-        """Second call writes no overrides when NOT EXISTS has already filtered the pairs."""
+    def test_idempotent_second_run_rewrites_same_values(self, mock_db):
+        """INTERNAL TRANSFER legs stay in the candidate pool (the query re-admits
+        them), so a second run re-pairs and rewrites the SAME category value —
+        idempotent in effect."""
         with patch("db.upsert_category_override") as mock_upsert:
             # First run: pair found, both legs overridden.
             mock_db.fetchall.return_value = self._TXNS
             analytics.detect_internal_transfers(dry_run=False)
             assert mock_upsert.call_count == 2
 
-            # Second run: NOT EXISTS filters them out — DB returns nothing.
-            mock_db.fetchall.return_value = []
+            # Second run: query re-admits INTERNAL TRANSFER legs — same rows again.
+            analytics.detect_internal_transfers(dry_run=False)
+
+        assert mock_upsert.call_count == 4  # same 2 legs rewritten
+        calls = {c.args for c in mock_upsert.call_args_list}
+        assert calls == {
+            ("txn_out", "INTERNAL TRANSFER"),
+            ("txn_in", "INTERNAL TRANSFER"),
+        }
+
+    def test_sql_readmits_internal_transfer_overrides(self, mock_db):
+        """Only overrides OTHER than 'INTERNAL TRANSFER' may exclude a leg —
+        detector-written overrides must be re-checkable so a reposted partner
+        (new transaction_id after pending→posted) can complete the pair."""
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "NOT EXISTS" in sql
+        assert "co.category <> 'INTERNAL TRANSFER'" in sql
+
+    def test_sql_excludes_superseded_pending_rows(self, mock_db):
+        """A pending row already superseded by a posted row must not enter the
+        pool — it would form a 3-leg group and block the reposted row."""
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "t.pending" in sql
+        assert "pending_transaction_id" in sql
+
+    def test_manual_override_leg_blocks_pair(self, mock_db):
+        """A leg carrying a non-INTERNAL-TRANSFER override (manual or rule) is
+        filtered out by the query — its partner arrives alone and no pair is
+        made, no override is clobbered."""
+        mock_db.fetchall.return_value = [
+            self._TXNS[0],  # partner excluded by SQL (e.g. CREDIT PAYMENT override)
+        ]
+
+        with patch("db.upsert_category_override") as mock_upsert:
             pairs = analytics.detect_internal_transfers(dry_run=False)
 
         assert pairs == []
-        assert mock_upsert.call_count == 2  # no new writes
+        mock_upsert.assert_not_called()
+
+    def test_reposted_leg_pairs_with_overridden_partner(self, mock_db):
+        """Pending→posted churn, the core prod failure: the pending out-leg was
+        paired and overridden, then Plaid replaced it with a posted row under a
+        NEW transaction_id. The new row (no override) must re-pair with the
+        still-overridden in-leg so the transfer is excluded from spend again."""
+        posted_out = {
+            **self._TXNS[0],
+            "transaction_id": "txn_out_posted",  # new id after pending→posted
+        }
+        overridden_in = self._TXNS[1]  # still carries INTERNAL TRANSFER override
+
+        mock_db.fetchall.return_value = [posted_out, overridden_in]
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+
+        assert len(pairs) == 1
+        assert {pairs[0]["txn_id_a"], pairs[0]["txn_id_b"]} == {
+            "txn_out_posted",
+            "txn_in",
+        }
+        calls = {c.args for c in mock_upsert.call_args_list}
+        assert ("txn_out_posted", "INTERNAL TRANSFER") in calls
+        assert ("txn_in", "INTERNAL TRANSFER") in calls  # rewritten, same value
+
+    def test_full_churn_sequence_pair_then_repost(self, mock_db):
+        """Two detection runs across a pending→posted replacement: run 1 pairs
+        pending out + posted in; Plaid deletes the pending row and re-adds it
+        under a new id; run 2 must heal the pair."""
+        pending_out = {
+            **self._TXNS[0],
+            "transaction_id": "txn_out_pending",
+            "pending": True,
+        }
+        posted_in = self._TXNS[1]
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            # Run 1: both legs fresh — pair written.
+            mock_db.fetchall.return_value = [pending_out, posted_in]
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+            assert len(pairs) == 1
+
+            # Run 2: pending row deleted by Plaid, posted row has a new id;
+            # the in-leg is re-admitted despite its INTERNAL TRANSFER override.
+            reposted_out = {**self._TXNS[0], "transaction_id": "txn_out_posted"}
+            mock_db.fetchall.return_value = [reposted_out, posted_in]
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+
+        assert len(pairs) == 1
+        assert {pairs[0]["txn_id_a"], pairs[0]["txn_id_b"]} == {
+            "txn_out_posted",
+            "txn_in",
+        }
+        all_calls = [c.args for c in mock_upsert.call_args_list]
+        assert ("txn_out_posted", "INTERNAL TRANSFER") in all_calls
+        assert all_calls.count(("txn_in", "INTERNAL TRANSFER")) == 2  # both runs
 
     def test_pair_detected_regardless_of_plaid_category(self, mock_db):
         """Plaid may miscategorize one leg (e.g. GENERAL_MERCHANDISE) — the transfer
