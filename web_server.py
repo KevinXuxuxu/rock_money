@@ -303,9 +303,33 @@ def set_category_web(txn_id):
 
 @app.get("/rules")
 def rules_page():
-    rules = db.list_category_rules()
+    q = request.args.get("q", "").strip() or None
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    per_page = 20
+
+    total = db.count_category_rules(search=q)
+    pages = max((total + per_page - 1) // per_page, 1)
+    page = min(page, pages)
+    rules = db.list_category_rules(
+        search=q, limit=per_page, offset=(page - 1) * per_page
+    )
+    total_all = db.count_category_rules() if q else total
     categories = analytics.get_categories()
-    return render_template("rules.html", rules=rules, categories=categories)
+
+    return render_template(
+        "rules.html",
+        rules=rules,
+        categories=categories,
+        q=q or "",
+        page=page,
+        pages=pages,
+        per_page=per_page,
+        total=total,
+        total_all=total_all,
+    )
 
 
 @app.post("/rules")
@@ -347,7 +371,13 @@ def add_rule():
 def delete_rule(rule_id):
     db.delete_category_rule(rule_id)
     flash(f"Rule #{rule_id} deleted.", "info")
-    return redirect(url_for("rules_page"))
+    # Return to the page the user was browsing (search + page travel in the form).
+    q = request.form.get("q", "").strip() or None
+    try:
+        page = max(1, int(request.form.get("page", 1)))
+    except ValueError:
+        page = 1
+    return redirect(url_for("rules_page", q=q, page=page if page > 1 else None))
 
 
 @app.post("/rules/apply")
