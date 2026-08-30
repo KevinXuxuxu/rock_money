@@ -50,22 +50,22 @@
     <h3>Step 2 — Apply saved rules to transactions</h3>
     <p class="muted" style="font-size:13px;margin-bottom:14px">
       Rules must be saved (Step 1) before you can apply or test them.
-      There {{ 'is' if rules|length == 1 else 'are' }} currently
-      <strong>{{ rules|length }} saved rule{{ 's' if rules|length != 1 }}</strong>.
+      There {{ 'is' if total_all == 1 else 'are' }} currently
+      <strong>{{ total_all }} saved rule{{ 's' if total_all != 1 }}</strong>.
     </p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <form method="post" action="/rules/apply">
         <input type="hidden" name="dry_run" value="0">
-        <button type="submit" {% if not rules %}disabled title="Save a rule first"{% endif %}
-                style="background:var(--green);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:14px;font-weight:500;cursor:pointer;opacity:{% if rules %}1{% else %}.4{% endif %}">
+        <button type="submit" {% if not total_all %}disabled title="Save a rule first"{% endif %}
+                style="background:var(--green);color:white;border:none;border-radius:8px;padding:9px 18px;font-size:14px;font-weight:500;cursor:pointer;opacity:{% if total_all %}1{% else %}.4{% endif %}">
           Apply rules to all transactions
         </button>
       </form>
       <form method="post" action="/rules/apply">
         <input type="hidden" name="dry_run" value="1">
-        <button type="submit" {% if not rules %}disabled title="Save a rule first"{% endif %}
+        <button type="submit" {% if not total_all %}disabled title="Save a rule first"{% endif %}
                 class="btn-secondary"
-                style="border-radius:8px;padding:9px 18px;font-size:14px;font-weight:500;cursor:pointer;opacity:{% if rules %}1{% else %}.4{% endif %}">
+                style="border-radius:8px;padding:9px 18px;font-size:14px;font-weight:500;cursor:pointer;opacity:{% if total_all %}1{% else %}.4{% endif %}">
           Dry run (preview only)
         </button>
       </form>
@@ -76,8 +76,29 @@
 <!-- Saved rules table -->
 <section>
   <div class="card">
-    <h3>Saved rules ({{ rules|length }})</h3>
+    <h3>Saved rules
+      {% if q %}
+        — {{ total }} match{{ 'es' if total != 1 else '' }} for “{{ q }}”
+        <span class="muted">(of {{ total_all }} total)</span>
+      {% else %}
+        ({{ total_all }})
+      {% endif %}
+    </h3>
+
+    <form class="filters" method="get" action="/rules">
+      <label>
+        Search
+        <input type="text" name="q" value="{{ q }}" placeholder="pattern or category…" style="min-width:180px">
+      </label>
+      <button type="submit">Search</button>
+      <a href="/rules"><button type="button" class="btn-reset">Reset</button></a>
+    </form>
+
     {% if rules %}
+    <p class="muted" style="font-size:13px;margin:-8px 0 12px">
+      Showing {{ (page - 1) * per_page + 1 }}–{{ [(page - 1) * per_page + rules|length, total] | min }}
+      of {{ total }}
+    </p>
     <div class="table-wrap">
       <table>
         <thead>
@@ -101,6 +122,8 @@
             <td>
               <form method="post" action="/rules/{{ r.id }}/delete"
                     onsubmit="return confirm('Delete rule #{{ r.id }}?')">
+                <input type="hidden" name="q" value="{{ q }}">
+                <input type="hidden" name="page" value="{{ page }}">
                 <button type="submit" class="btn-icon" title="Delete">✕</button>
               </form>
             </td>
@@ -109,8 +132,25 @@
         </tbody>
       </table>
     </div>
+    {% elif q %}
+      <div class="empty">No rules match “{{ q }}”. <a href="/rules">Clear search</a></div>
     {% else %}
-      <div class="empty">No saved rules yet. Fill in Step 1 above and click "Save rule".</div>
+      <div class="empty">No saved rules yet. Fill in Step 1 above and click “Save rule”.</div>
+    {% endif %}
+    {% if pages > 1 %}
+    <div class="month-nav" style="margin:16px 0 0">
+      {% if page > 1 %}
+        <a class="month-arrow" href="{{ url_for('rules_page', q=q or none, page=page - 1) }}" title="Previous page">‹</a>
+      {% else %}
+        <span class="month-arrow disabled">‹</span>
+      {% endif %}
+      <span class="month-current" style="font-size:14px;min-width:auto">Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}
+        <a class="month-arrow" href="{{ url_for('rules_page', q=q or none, page=page + 1) }}" title="Next page">›</a>
+      {% else %}
+        <span class="month-arrow disabled">›</span>
+      {% endif %}
+    </div>
     {% endif %}
   </div>
 </section>

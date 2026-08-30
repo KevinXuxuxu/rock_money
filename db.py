@@ -291,13 +291,51 @@ def delete_category_rule(rule_id: int) -> bool:
             return cur.rowcount > 0
 
 
-def list_category_rules() -> list[dict]:
+def list_category_rules(
+    search: str | None = None,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> list[dict]:
+    """
+    Return category rules ordered by priority DESC, id ASC.
+
+    Args:
+        search: optional case-insensitive substring filter on match_pattern OR category
+        limit: max rows to return (None = all)
+        offset: rows to skip, for pagination (applied after ordering)
+    """
+    where, params = _rule_search_filter(search)
+    query = f"""
+        SELECT * FROM category_rules
+        {where}
+        ORDER BY priority DESC, id
+    """
+    if limit is not None:
+        query += " LIMIT %s OFFSET %s"
+        params += [limit, offset or 0]
     with get_conn() as conn:
         import psycopg2.extras
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT * FROM category_rules ORDER BY priority DESC, id")
+            cur.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
+
+
+def count_category_rules(search: str | None = None) -> int:
+    """Count rules, optionally filtered by the same search as list_category_rules."""
+    where, params = _rule_search_filter(search)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) FROM category_rules {where}", params)
+            return cur.fetchone()[0]
+
+
+def _rule_search_filter(search: str | None) -> tuple[str, list]:
+    """Build the shared WHERE clause for rule search (pattern OR category)."""
+    if not search:
+        return "", []
+    like = f"%{search}%"
+    return "WHERE match_pattern ILIKE %s OR category ILIKE %s", [like, like]
 
 
 # ── Budgets ────────────────────────────────────────────────────────────────────

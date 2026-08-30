@@ -425,17 +425,20 @@ class TestTransactionDetailPage:
 
 
 class TestRulesPage:
+    @patch("db.count_category_rules")
     @patch("analytics.get_categories")
     @patch("db.list_category_rules")
-    def test_returns_200(self, mock_rules, mock_cats, client):
+    def test_returns_200(self, mock_rules, mock_cats, mock_count, client):
         mock_rules.return_value = []
         mock_cats.return_value = []
+        mock_count.return_value = 0
         resp = client.get("/rules")
         assert resp.status_code == 200
 
+    @patch("db.count_category_rules")
     @patch("analytics.get_categories")
     @patch("db.list_category_rules")
-    def test_shows_rules(self, mock_rules, mock_cats, client):
+    def test_shows_rules(self, mock_rules, mock_cats, mock_count, client):
         mock_rules.return_value = [
             {
                 "id": 1,
@@ -446,23 +449,30 @@ class TestRulesPage:
             },
         ]
         mock_cats.return_value = []
+        mock_count.return_value = 1
         resp = client.get("/rules")
         assert b"Netflix" in resp.data
         assert b"Subscriptions" in resp.data
 
+    @patch("db.count_category_rules")
     @patch("analytics.get_categories")
     @patch("db.list_category_rules")
-    def test_empty_state(self, mock_rules, mock_cats, client):
+    def test_empty_state(self, mock_rules, mock_cats, mock_count, client):
         mock_rules.return_value = []
         mock_cats.return_value = []
+        mock_count.return_value = 0
         resp = client.get("/rules")
         assert b"No saved rules" in resp.data
 
+    @patch("db.count_category_rules")
     @patch("analytics.get_categories")
     @patch("db.list_category_rules")
-    def test_categories_populate_datalist(self, mock_rules, mock_cats, client):
+    def test_categories_populate_datalist(
+        self, mock_rules, mock_cats, mock_count, client
+    ):
         mock_rules.return_value = []
         mock_cats.return_value = ["GROCERIES", "DINING"]
+        mock_count.return_value = 0
         resp = client.get("/rules")
         assert b"GROCERIES" in resp.data
 
@@ -497,15 +507,117 @@ class TestRulesPage:
         mock_apply.assert_called_once_with(dry_run=False)
 
     @patch("db.delete_category_rule")
-    @patch("analytics.get_categories")
-    @patch("db.list_category_rules")
-    def test_delete_rule_redirects(self, mock_rules, mock_cats, mock_delete, client):
-        mock_rules.return_value = []
-        mock_cats.return_value = []
-        mock_delete.return_value = True
+    def test_delete_rule_redirects(self, mock_delete, client):
+        """Plain delete (no search/page context) redirects back to the rules page."""
         resp = client.post("/rules/3/delete")
         assert resp.status_code == 302
         mock_delete.assert_called_once_with(3)
+        assert resp.headers["Location"].endswith("/rules")
+
+    @patch("db.delete_category_rule")
+    def test_delete_rule_preserves_search_and_page(self, mock_delete, client):
+        """Deleting from page 2 of a search returns the user to that exact view."""
+        resp = client.post("/rules/3/delete", data={"q": "net", "page": "2"})
+        assert resp.status_code == 302
+        loc = resp.headers["Location"]
+        assert "page=2" in loc and "q=net" in loc
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_search_passed_to_db(self, mock_rules, mock_cats, mock_count, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_count.return_value = 0
+        client.get("/rules?q=netflix")
+        mock_rules.assert_called_once_with(search="netflix", limit=20, offset=0)
+        mock_count.assert_any_call(search="netflix")
+        mock_count.assert_any_call()  # unfiltered total for the "of N total" text
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_second_page_uses_offset(self, mock_rules, mock_cats, mock_count, client):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_count.return_value = 45
+        resp = client.get("/rules?page=3")
+        assert resp.status_code == 200
+        mock_rules.assert_called_once_with(search=None, limit=20, offset=40)
+        assert b"Page 3 of 3" in resp.data
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_search_combines_with_pagination(
+        self, mock_rules, mock_cats, mock_count, client
+    ):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_count.return_value = 25
+        client.get("/rules?q=net&page=2")
+        mock_rules.assert_called_once_with(search="net", limit=20, offset=20)
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_page_beyond_last_is_clamped(
+        self, mock_rules, mock_cats, mock_count, client
+    ):
+        """?page=99 with 25 rules lands on the last page, not a 500 or empty view."""
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_count.return_value = 25
+        resp = client.get("/rules?page=99")
+        assert resp.status_code == 200
+        mock_rules.assert_called_once_with(search=None, limit=20, offset=20)
+        assert b"Page 2 of 2" in resp.data
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_invalid_page_defaults_to_first(
+        self, mock_rules, mock_cats, mock_count, client
+    ):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_count.return_value = 45
+        resp = client.get("/rules?page=abc")
+        assert resp.status_code == 200
+        mock_rules.assert_called_once_with(search=None, limit=20, offset=0)
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_search_result_count_shown(self, mock_rules, mock_cats, mock_count, client):
+        """With an active search the header shows match count and total."""
+        mock_rules.return_value = [
+            {
+                "id": 1,
+                "match_field": "merchant_name",
+                "match_pattern": "Netflix",
+                "category": "Subscriptions",
+                "priority": 10,
+            },
+        ]
+        mock_cats.return_value = []
+        mock_count.side_effect = [1, 45]  # filtered=1, total=45
+        resp = client.get("/rules?q=net")
+        assert b"1 match" in resp.data
+        assert b"of 45 total" in resp.data
+
+    @patch("db.count_category_rules")
+    @patch("analytics.get_categories")
+    @patch("db.list_category_rules")
+    def test_no_search_match_shows_clear_link(
+        self, mock_rules, mock_cats, mock_count, client
+    ):
+        mock_rules.return_value = []
+        mock_cats.return_value = []
+        mock_count.side_effect = [0, 45]
+        resp = client.get("/rules?q=zzz")
+        assert b"No rules match" in resp.data
+        assert b"Clear search" in resp.data
 
     @patch("db.add_category_rule")
     @patch("analytics.get_categories")
@@ -547,14 +659,16 @@ class TestRulesPage:
         assert resp.status_code == 302
         mock_add.assert_not_called()
 
+    @patch("db.count_category_rules")
     @patch("analytics.apply_rules")
     @patch("analytics.get_categories")
     @patch("db.list_category_rules")
     def test_dry_run_shows_match_count_in_flash(
-        self, mock_rules, mock_cats, mock_apply, client
+        self, mock_rules, mock_cats, mock_apply, mock_count, client
     ):
         mock_rules.return_value = []
         mock_cats.return_value = []
+        mock_count.return_value = 0
         mock_apply.return_value = [
             {"transaction_id": "txn_1"},
             {"transaction_id": "txn_2"},

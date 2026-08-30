@@ -129,6 +129,57 @@ class TestCategoryRules:
         sql = mock_db.execute.call_args[0][0]
         assert "ORDER BY priority DESC" in sql
 
+    def test_list_rules_no_search_has_no_where(self, mock_db):
+        mock_db.fetchall.return_value = []
+        db.list_category_rules()
+        sql = mock_db.execute.call_args[0][0]
+        assert "WHERE" not in sql
+        assert "LIMIT" not in sql
+
+    def test_list_rules_search_filters_pattern_or_category(self, mock_db):
+        mock_db.fetchall.return_value = []
+        db.list_category_rules(search="net")
+        sql, params = mock_db.execute.call_args[0]
+        assert "match_pattern ILIKE %s OR category ILIKE %s" in sql
+        assert params == ["%net%", "%net%"]
+
+    def test_list_rules_search_is_case_insensitive(self, mock_db):
+        """ILIKE (not LIKE) so 'NET' matches 'Netflix'."""
+        mock_db.fetchall.return_value = []
+        db.list_category_rules(search="NET")
+        sql = mock_db.execute.call_args[0][0]
+        assert "ILIKE" in sql
+
+    def test_list_rules_pagination_applies_limit_and_offset(self, mock_db):
+        mock_db.fetchall.return_value = []
+        db.list_category_rules(limit=20, offset=40)
+        sql, params = mock_db.execute.call_args[0]
+        assert "LIMIT %s OFFSET %s" in sql
+        assert params[-2:] == [20, 40]
+        # Pagination applies after ordering
+        assert sql.index("ORDER BY") < sql.index("LIMIT")
+
+    def test_list_rules_offset_defaults_to_zero(self, mock_db):
+        mock_db.fetchall.return_value = []
+        db.list_category_rules(limit=20)
+        params = mock_db.execute.call_args[0][1]
+        assert params[-2:] == [20, 0]
+
+    def test_count_rules_without_search(self, mock_db):
+        mock_db.fetchone.return_value = (45,)
+        assert db.count_category_rules() == 45
+        sql, params = mock_db.execute.call_args[0]
+        assert "SELECT COUNT(*) FROM category_rules" in sql
+        assert "WHERE" not in sql
+        assert params == []
+
+    def test_count_rules_with_search_matches_list_filter(self, mock_db):
+        mock_db.fetchone.return_value = (2,)
+        assert db.count_category_rules(search="net") == 2
+        sql, params = mock_db.execute.call_args[0]
+        assert "match_pattern ILIKE %s OR category ILIKE %s" in sql
+        assert params == ["%net%", "%net%"]
+
 
 class TestTransactionNotes:
     """Phase 7: upsert/delete/get transaction notes."""
