@@ -358,7 +358,13 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
     amounts cancel out (within $0.01). ID is extracted from the name field
     (falling back to merchant_name) using _TRANSFER_ID_PATTERNS.
 
-    Skips transactions that already have a manual category override.
+    Skips transactions that have a manual/rule override (any category other
+    than 'INTERNAL TRANSFER'). Legs previously marked 'INTERNAL TRANSFER' by
+    this detector are re-admitted: Plaid assigns a NEW transaction_id when a
+    pending transaction posts, so the reposted leg must be able to re-pair
+    with its already-overridden partner instead of orphaning it. Superseded
+    pending rows are excluded so they can't create 3-leg groups.
+
     Writes 'INTERNAL TRANSFER' overrides for both legs unless dry_run=True.
 
     Returns a list of matched pairs:
@@ -368,16 +374,22 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
         import psycopg2.extras
 
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT t.transaction_id, t.amount, t.name, t.merchant_name,
                        a.name AS account_name
                 FROM transactions t
                 JOIN accounts a ON a.account_id = t.account_id
-                WHERE NOT EXISTS (
-                      SELECT 1 FROM category_overrides
-                      WHERE transaction_id = t.transaction_id
+                WHERE """
+                + _NOT_SUPERSEDED
+                + """
+                  AND NOT EXISTS (
+                      SELECT 1 FROM category_overrides co
+                      WHERE co.transaction_id = t.transaction_id
+                        AND co.category <> 'INTERNAL TRANSFER'
                   )
-            """)
+            """
+            )
             transactions = [dict(row) for row in cur.fetchall()]
 
     # Group by extracted transfer ID
