@@ -690,7 +690,7 @@ def main():
     # web
     p_web = sub.add_parser("web", help="Start the web dashboard")
     p_web.add_argument(
-        "--port", type=int, default=8123, help="Port to listen on (default: 5000)"
+        "--port", type=int, default=8123, help="Port to listen on (default: 8123)"
     )
     p_web.add_argument(
         "--debug", action="store_true", help="Enable DEBUG logging (verbose)"
