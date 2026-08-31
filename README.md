@@ -14,15 +14,32 @@ local, no monthly fee and no third party holding onto your data.
 - Incremental transaction sync using Plaid's `/transactions/sync` cursor API.
   Crash-safe: cursors are persisted per-page so a re-run never re-fetches.
 - Idempotent upserts — running `sync` repeatedly is safe.
+- Pending transactions are counted in stats; a pending row already superseded
+  by its posted twin is excluded so nothing is double-counted.
 - Cascading deletes: removing an item cleans up its accounts and transactions.
+
+**Internal transfer detection**
+- Runs automatically after every sync (or standalone via `detect-transfers`).
+- Matches transfer legs by bank-assigned reference IDs (Citi `IITCIT…`, Chase
+  `transaction#: N` today) and requires the amounts to cancel within $0.01.
+- Marked pairs get an `INTERNAL TRANSFER` category and are excluded from
+  spend/income aggregations so moving money between your own accounts never
+  distorts reports.
+- Self-healing: handles Plaid's pending→posted ID churn (a reposted leg
+  re-pairs with its already-marked partner), never clobbers manual or rule
+  overrides, and `--dry-run` previews pairs without writing.
 
 **Web dashboard** (`uv run python main.py web`)
 - Account summary with transaction counts and debit/credit totals.
 - Transactions page with full-text search (merchant, name, note), month/
-  category/account filters, and saved search views.
+  category/account filters, saved search views, and a live total for the
+  current filter.
 - Transaction detail page: override category, add a note, add/remove tags.
-- Spend-by-category bar chart and month-over-month cash-flow report.
+- Spend-by-category bar chart and month-over-month cash-flow report; report
+  categories link through to the filtered transactions list.
 - Budget tracking: set per-category monthly limits and track progress.
+- Rules page with search (pattern or category) and pagination — browsable
+  even with hundreds of rules.
 
 **Category rules engine**
 - Define rules that match transactions by merchant name, display name, or
@@ -67,11 +84,15 @@ uv run python main.py sync
 # See what's connected and when it was last synced
 uv run python main.py list-items
 
-# Launch the web dashboard (default: http://localhost:5000)
+# Launch the web dashboard (default: http://localhost:8123)
 uv run python main.py web
 
 # Enable verbose logging
 uv run python main.py web --debug
+
+# Detect internal transfers (also runs automatically after every sync)
+uv run python main.py detect-transfers --dry-run  # preview only
+uv run python main.py detect-transfers            # mark pairs as INTERNAL TRANSFER
 ```
 
 Plaid sandbox test credentials: username `user_good`, password `pass_good`,
@@ -79,7 +100,7 @@ phone OTP `123456`.
 
 ## Data model
 
-Eight tables in PostgreSQL:
+Ten tables in PostgreSQL:
 
 - `items` — one row per linked institution (holds the Plaid access token)
 - `accounts` — bank/credit/investment accounts within an item
@@ -103,6 +124,9 @@ Effective category priority (highest wins):
 2. Rule match (highest-priority rule wins; rules auto-apply after sync)
 3. Plaid's `personal_finance_category`
 
+`INTERNAL TRANSFER` (written by the transfer detector) and `CREDIT PAYMENT`
+are treated as internal noise and excluded from spend/income summaries.
+
 ## Architecture
 
 `main.py` → `link_server.py` or `sync.py` → `plaid_client.py` + `db.py`  
@@ -112,17 +136,30 @@ Effective category priority (highest wins):
   generator over cursor pages.
 - `db.py` — raw psycopg2 with a `ThreadedConnectionPool`; all writes are
   upserts.
-- `sync.py` — drives the cursor loop, persists progress per-page, and
-  auto-applies category rules after each full sync.
+- `sync.py` — drives the cursor loop, persists progress per-page, and after
+  each full sync auto-applies category rules, then runs internal transfer
+  detection.
 - `link_server.py` — short-lived Flask server that hosts Plaid Link during
   the connect flow, then shuts itself down.
 - `analytics.py` — all query and report logic: transaction search, spend
-  summaries, budget status, category rule matching.
+  summaries, budget status, category rule matching, and internal transfer
+  detection.
 - `web_server.py` — persistent Flask dashboard; routes map to analytics
   queries and template renders.
 - `main.py` — argparse CLI entrypoint.
 
 See [CLAUDE.md](CLAUDE.md) for deeper notes on each module.
+
+## Development
+
+Tests, linter, and formatter run in CI (GitHub Actions) on every push and PR:
+
+```bash
+uv run pytest            # unit tests (all DB access is mocked; a conftest
+                         # guard fails any test that tries a real connection)
+uv run ruff check .      # lint
+uv run ruff format --check .
+```
 
 ## Roadmap
 
