@@ -7,6 +7,28 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import db
+
+
+@pytest.fixture(autouse=True)
+def _forbid_real_db(monkeypatch):
+    """
+    Fail loudly if any test tries to open a real database connection.
+
+    Tests must mock at the db.py boundary (see mock_db). Without this guard a
+    forgotten mock silently queries the developer's local Postgres (via
+    DATABASE_URL from .env) — the test passes locally but fails in CI where no
+    .env/DB exists. Replaced by mock_db's own patch in tests that request it.
+    """
+
+    def _boom(*args, **kwargs):
+        raise AssertionError(
+            "test attempted real DB access — patch db.get_conn (mock_db fixture) "
+            "or mock the calling analytics/db function"
+        )
+
+    monkeypatch.setattr(db, "get_conn", _boom)
+
 
 @pytest.fixture
 def mock_db():

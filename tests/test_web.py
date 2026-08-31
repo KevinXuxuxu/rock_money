@@ -30,25 +30,30 @@ def _summary_rows():
 
 
 class TestDashboard:
+    @patch("analytics.income_by_category")
     @patch("analytics.monthly_summary")
     @patch("analytics.spend_by_category")
     @patch("analytics.get_transactions")
     @patch("analytics.get_accounts")
-    def test_returns_200(self, mock_accts, mock_txns, mock_spend, mock_summary, client):
+    def test_returns_200(
+        self, mock_accts, mock_txns, mock_spend, mock_summary, mock_income, client
+    ):
         mock_accts.return_value = [make_account()]
         mock_txns.return_value = [make_txn()]
         mock_spend.return_value = _spend_rows()
         mock_summary.return_value = _summary_rows()
+        mock_income.return_value = []
 
         resp = client.get("/")
         assert resp.status_code == 200
 
+    @patch("analytics.income_by_category")
     @patch("analytics.monthly_summary")
     @patch("analytics.spend_by_category")
     @patch("analytics.get_transactions")
     @patch("analytics.get_accounts")
     def test_shows_account_count(
-        self, mock_accts, mock_txns, mock_spend, mock_summary, client
+        self, mock_accts, mock_txns, mock_spend, mock_summary, mock_income, client
     ):
         mock_accts.return_value = [
             make_account(name="Checking"),
@@ -57,36 +62,41 @@ class TestDashboard:
         mock_txns.return_value = []
         mock_spend.return_value = []
         mock_summary.return_value = []
+        mock_income.return_value = []
 
         resp = client.get("/")
         assert b"2" in resp.data
 
+    @patch("analytics.income_by_category")
     @patch("analytics.monthly_summary")
     @patch("analytics.spend_by_category")
     @patch("analytics.get_transactions")
     @patch("analytics.get_accounts")
     def test_shows_spend_category(
-        self, mock_accts, mock_txns, mock_spend, mock_summary, client
+        self, mock_accts, mock_txns, mock_spend, mock_summary, mock_income, client
     ):
         mock_accts.return_value = []
         mock_txns.return_value = []
         mock_spend.return_value = _spend_rows()
         mock_summary.return_value = []
+        mock_income.return_value = []
 
         resp = client.get("/")
         assert b"FOOD_AND_DRINK" in resp.data
 
+    @patch("analytics.income_by_category")
     @patch("analytics.monthly_summary")
     @patch("analytics.spend_by_category")
     @patch("analytics.get_transactions")
     @patch("analytics.get_accounts")
     def test_shows_recent_transactions(
-        self, mock_accts, mock_txns, mock_spend, mock_summary, client
+        self, mock_accts, mock_txns, mock_spend, mock_summary, mock_income, client
     ):
         mock_accts.return_value = []
         mock_txns.return_value = [make_txn(merchant_name="Netflix", amount=15.99)]
         mock_spend.return_value = []
         mock_summary.return_value = []
+        mock_income.return_value = []
 
         resp = client.get("/")
         assert b"Netflix" in resp.data
@@ -680,39 +690,52 @@ class TestRulesPage:
 
 
 class TestReportsPage:
+    @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
-    def test_returns_200(self, mock_summary, mock_spend, mock_budgets, client):
+    def test_returns_200(
+        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+    ):
         mock_summary.return_value = _summary_rows()
         mock_spend.return_value = _spend_rows()
         mock_budgets.return_value = []
+        mock_income.return_value = []
         resp = client.get("/reports")
         assert resp.status_code == 200
 
+    @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
-    def test_shows_monthly_data(self, mock_summary, mock_spend, mock_budgets, client):
+    def test_shows_monthly_data(
+        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+    ):
         mock_summary.return_value = _summary_rows()
         mock_spend.return_value = []
         mock_budgets.return_value = []
+        mock_income.return_value = []
         resp = client.get("/reports")
         assert b"5,000.00" in resp.data
         assert b"3,000.00" in resp.data
 
+    @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
-    def test_month_param_passed(self, mock_summary, mock_spend, mock_budgets, client):
+    def test_month_param_passed(
+        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+    ):
         mock_summary.return_value = []
         mock_spend.return_value = []
         mock_budgets.return_value = []
+        mock_income.return_value = []
 
         client.get("/reports?month=2026-03")
 
         called_month = mock_spend.call_args.args[0]
         assert called_month == "2026-03"
+        assert mock_income.call_args.args[0] == "2026-03"
 
     @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
@@ -739,12 +762,16 @@ class TestReportsPage:
             b'href="/transactions?month=2026-05&amp;category=INCOME_WAGES"' in resp.data
         )
 
+    @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
-    def test_shows_budget_status(self, mock_summary, mock_spend, mock_budgets, client):
+    def test_shows_budget_status(
+        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+    ):
         mock_summary.return_value = []
         mock_spend.return_value = []
+        mock_income.return_value = []
         mock_budgets.return_value = [
             {
                 "category": "GROCERIES",
