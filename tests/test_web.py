@@ -22,6 +22,28 @@ def _spend_rows():
     ]
 
 
+def _spend_pairs():
+    """spend_by_category_account rows matching _spend_rows() totals (350 + 80)."""
+    return [
+        {
+            "account_id": "a1",
+            "account_name": "Chase Checking",
+            "account_mask": "1234",
+            "category": "FOOD_AND_DRINK",
+            "total_spend": 350.0,
+            "txn_count": 8,
+        },
+        {
+            "account_id": "a1",
+            "account_name": "Chase Checking",
+            "account_mask": "1234",
+            "category": "TRANSPORTATION",
+            "total_spend": 80.0,
+            "txn_count": 3,
+        },
+    ]
+
+
 def _summary_rows():
     return [
         {"month": "2026-05-01", "income": 5000.0, "spend": 3000.0, "net": 2000.0},
@@ -690,59 +712,102 @@ class TestRulesPage:
 
 
 class TestReportsPage:
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
     @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
     def test_returns_200(
-        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
     ):
         mock_summary.return_value = _summary_rows()
         mock_spend.return_value = _spend_rows()
         mock_budgets.return_value = []
         mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = []
         resp = client.get("/reports")
         assert resp.status_code == 200
 
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
     @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
     def test_shows_monthly_data(
-        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
     ):
         mock_summary.return_value = _summary_rows()
         mock_spend.return_value = []
         mock_budgets.return_value = []
         mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = []
         resp = client.get("/reports")
         assert b"5,000.00" in resp.data
         assert b"3,000.00" in resp.data
 
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
     @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
     def test_month_param_passed(
-        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
     ):
         mock_summary.return_value = []
         mock_spend.return_value = []
         mock_budgets.return_value = []
         mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = []
 
         client.get("/reports?month=2026-03")
 
         called_month = mock_spend.call_args.args[0]
         assert called_month == "2026-03"
         assert mock_income.call_args.args[0] == "2026-03"
+        assert mock_income_acct.call_args.args[0] == "2026-03"
 
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
     @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
     def test_categories_link_to_filtered_transactions(
-        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
     ):
         """Spend and income categories link to transactions filtered by month + category."""
         mock_summary.return_value = []
@@ -751,6 +816,8 @@ class TestReportsPage:
         mock_income.return_value = [
             {"category": "INCOME_WAGES", "total_income": 5000.0, "txn_count": 1}
         ]
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = []
 
         resp = client.get("/reports?month=2026-05")
 
@@ -762,16 +829,27 @@ class TestReportsPage:
             b'href="/transactions?month=2026-05&amp;category=INCOME_WAGES"' in resp.data
         )
 
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
     @patch("analytics.income_by_category")
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
     def test_shows_budget_status(
-        self, mock_summary, mock_spend, mock_budgets, mock_income, client
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
     ):
         mock_summary.return_value = []
         mock_spend.return_value = []
         mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = []
         mock_budgets.return_value = [
             {
                 "category": "GROCERIES",
@@ -784,3 +862,412 @@ class TestReportsPage:
         resp = client.get("/reports")
         assert b"GROCERIES" in resp.data
         assert b"90.0" in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_renders_with_income_and_spend(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Sankey chart + Plotly script render when the month has flow data."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows()  # FOOD_AND_DRINK 350.0
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = [
+            {
+                "account_id": "acct_1",
+                "account_name": "Chase Checking",
+                "account_mask": "1234",
+                "category": "INCOME_WAGES",
+                "total_income": 5100.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        assert b'id="sankey-chart"' in resp.data
+        assert b"cdn.plot.ly/plotly" in resp.data
+        # Payload nodes: income account (+mask) and spend category labels
+        assert b"Chase Checking" in resp.data
+        assert b"1234" in resp.data
+        assert b"INCOME_WAGES" in resp.data
+        assert b"FOOD_AND_DRINK" in resp.data
+        # Payload values (rounded to cents) are embedded in the page
+        assert b"5100.0" in resp.data
+        assert b"350.0" in resp.data
+        # 4th stage: accounts derived from the category×account pairs
+        assert b'"accounts"' in resp.data
+        assert b'"links"' in resp.data
+        # Flows > $2k get a second label line via <br> (plotly sankey multiline)
+        assert b"<br>$" in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_accounts_stage_conservess_flow(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Category and account node totals are derived from the same rounded
+        links, so the spend→accounts stage conserves flow exactly."""
+        mock_summary.return_value = []
+        mock_spend.return_value = []
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = [
+            {  # FOOD split across two accounts
+                "account_id": "a1",
+                "account_name": "Chase Card",
+                "account_mask": "1111",
+                "category": "FOOD_AND_DRINK",
+                "total_spend": 200.0,
+                "txn_count": 4,
+            },
+            {
+                "account_id": "a2",
+                "account_name": "Citi Card",
+                "account_mask": "2222",
+                "category": "FOOD_AND_DRINK",
+                "total_spend": 150.0,
+                "txn_count": 4,
+            },
+            {
+                "account_id": "a1",
+                "account_name": "Chase Card",
+                "account_mask": "1111",
+                "category": "RENT",
+                "total_spend": 2500.0,
+                "txn_count": 1,
+            },
+        ]
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a9",
+                "account_name": "Checking",
+                "account_mask": "9999",
+                "category": "INCOME_WAGES",
+                "total_income": 2850.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        # Category nodes: FOOD 350, RENT 2500 (sums of their links)
+        # Account nodes: Chase Card 2700, Citi Card 150
+        # Link values present individually
+        # Account labels use the •mask separator (tojson escapes • as \u2022)
+        assert b'"Chase Card \\u20221111"' in resp.data
+        assert b'"Citi Card \\u20222222"' in resp.data
+        # Balanced month: 2850 income = 2850 spend → no saved/withdraw
+        assert b'"saved"' not in resp.data
+        assert b'"withdraw"' not in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_saved_node_when_surplus(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Income > spend → surplus flows to a green 'Saved' node."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows()  # 350 + 80 = 430
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a1",
+                "account_name": "Chase Checking",
+                "account_mask": "1234",
+                "category": "INCOME_WAGES",
+                "total_income": 3180.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        assert b'"saved"' in resp.data
+        assert b"2750.0" in resp.data  # 3180 - 430
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_withdraw_node_when_deficit(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Spend > income → grey 'Withdraw' inflow equal to the shortfall;
+        no 'saved' key (Sankey link values can't be negative)."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows()  # 430
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a1",
+                "account_name": "Chase Checking",
+                "account_mask": "1234",
+                "category": "INCOME_WAGES",
+                "total_income": 100.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        assert b'"withdraw"' in resp.data
+        assert b"330.0" in resp.data  # 430 - 100
+        assert b'"saved"' not in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_balanced_month_has_neither_saved_nor_withdraw(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Income == spend → no Saved and no Withdraw node."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows()  # 430
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a1",
+                "account_name": "Chase Checking",
+                "account_mask": "1234",
+                "category": "INCOME_WAGES",
+                "total_income": 430.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        assert b'"saved"' not in resp.data
+        assert b'"withdraw"' not in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_script_is_sri_pinned(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Plotly must load from a versioned URL with a subresource-integrity hash
+        so a CDN change can't silently alter chart behavior."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows()
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a1",
+                "account_name": "A",
+                "account_mask": "1",
+                "category": "INCOME_WAGES",
+                "total_income": 1000.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        assert b"plotly-2.35.2.min.js" in resp.data  # exact version, not latest
+        assert b'integrity="sha384-' in resp.data
+        assert b'crossorigin="anonymous"' in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_income_label_falls_back_to_uncategorized(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """Rows with no category get an 'Uncategorized' label instead of 'None'."""
+        mock_summary.return_value = []
+        mock_spend.return_value = []
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs()
+        mock_income_acct.return_value = [
+            {
+                "account_name": "Citi Savings",
+                "category": None,
+                "total_income": 25.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        assert b"Citi Savings" in resp.data
+        assert b"Uncategorized" in resp.data
+        assert b"None" not in resp.data.split(b"sankey-chart")[1].split(b"</script>")[0]
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_investment_hidden_from_spend_chart_but_green_in_sankey(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """INVESTMENT is not consumption: hidden from the spend bar chart but
+        kept in the Sankey payload, flagged for savings-green rendering."""
+        mock_summary.return_value = []
+        mock_spend.return_value = _spend_rows() + [
+            {"category": "INVESTMENT", "total_spend": 3000.0, "txn_count": 2}
+        ]
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = _spend_pairs() + [
+            {
+                "account_id": "b1",
+                "account_name": "Fidelity",
+                "account_mask": "8888",
+                "category": "INVESTMENT",
+                "total_spend": 3000.0,
+                "txn_count": 2,
+            }
+        ]
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a9",
+                "account_name": "Checking",
+                "account_mask": "9999",
+                "category": "INCOME_WAGES",
+                "total_income": 3430.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        # Spend bar chart card: INVESTMENT row is gone, others remain
+        chart = resp.data.split(b"Spend by category", 1)[1]
+        chart = chart.split(b"Income by category", 1)[0]
+        assert b"INVESTMENT" not in chart
+        assert b"FOOD_AND_DRINK" in chart
+
+        # Sankey payload keeps the investment category, flagged green,
+        # flowing into its account node
+        assert b'"investment": true' in resp.data
+        assert b'"Fidelity \\u20228888"' in resp.data
+        # Investment is pinned to the END of the spend list (grouped with
+        # Saved at the bottom), not sorted by value — it's the biggest spend
+        # item here, so value-sort would put it first.
+        spend_array = resp.data.split(b'"spend": [', 1)[1].split(b"]", 1)[0]
+        assert spend_array.index(b'"FOOD_AND_DRINK"') < spend_array.index(
+            b'"INVESTMENT"'
+        )
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_sankey_hidden_when_no_flow_data(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """No income and no spend → empty state, no Plotly script downloaded."""
+        mock_summary.return_value = []
+        mock_spend.return_value = []
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = []
+        mock_income_acct.return_value = []
+
+        resp = client.get("/reports")
+
+        assert b"No income or spending data" in resp.data
+        assert b"cdn.plot.ly" not in resp.data

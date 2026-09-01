@@ -15,6 +15,11 @@ _log = logging.getLogger(__name__)
 # INTERNAL TRANSFER: detected TRANSFER_IN/OUT pairs between linked accounts.
 INTERNAL_CATEGORIES: frozenset[str] = frozenset({"INTERNAL TRANSFER", "CREDIT PAYMENT"})
 
+# Plaid primary category for brokerage/investment contributions. Not consumption:
+# excluded from the reports spend chart, but kept in the Sankey diagram where it
+# is colored savings-style green (money moved, not spent).
+INVESTMENT_CATEGORY = "INVESTMENT"
+
 # Pending transactions ARE counted in all stats — most of them post unchanged.
 # The one exception is a pending transaction that has already posted under a new
 # id: Plaid links the posted row to the pending one via pending_transaction_id
@@ -160,6 +165,85 @@ def income_by_category(month: str) -> list[dict]:
                       NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
                 GROUP BY COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_income DESC
+            """,
+                (f"{month}-01",),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def income_by_account_category(month: str) -> list[dict]:
+    """
+    Return income (credits) summed by account and effective category for a month.
+    Amounts are returned as positive numbers (negated from raw negative values).
+    Used by the reports page Sankey diagram (income = source stage).
+
+    Args:
+        month: YYYY-MM — e.g. '2026-06'
+    """
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT t.account_id,
+                       a.name AS account_name,
+                       a.mask AS account_mask,
+                       COALESCE(co.category, t.personal_finance_category) AS category,
+                       SUM(-t.amount) AS total_income,
+                       COUNT(*)       AS txn_count
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                WHERE """
+                + _NOT_SUPERSEDED
+                + """
+                  AND t.amount < 0
+                  AND date_trunc('month', t.date) = %s::date
+                  AND COALESCE(co.category, t.personal_finance_category)
+                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                GROUP BY t.account_id, a.name, a.mask,
+                         COALESCE(co.category, t.personal_finance_category)
+                ORDER BY total_income DESC
+            """,
+                (f"{month}-01",),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+
+def spend_by_category_account(month: str) -> list[dict]:
+    """
+    Return spending summed by effective category AND account for a month.
+    Used by the reports Sankey (spend categories → accounts stage).
+
+    Args:
+        month: YYYY-MM — e.g. '2026-06'
+    """
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT t.account_id,
+                       a.name AS account_name,
+                       a.mask AS account_mask,
+                       COALESCE(co.category, t.personal_finance_category) AS category,
+                       SUM(t.amount) AS total_spend,
+                       COUNT(*)       AS txn_count
+                FROM transactions t
+                JOIN accounts a ON a.account_id = t.account_id
+                LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                WHERE """
+                + _NOT_SUPERSEDED
+                + """
+                  AND t.amount > 0
+                  AND date_trunc('month', t.date) = %s::date
+                  AND COALESCE(co.category, t.personal_finance_category)
+                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                GROUP BY t.account_id, a.name, a.mask,
+                         COALESCE(co.category, t.personal_finance_category)
+                ORDER BY total_spend DESC
             """,
                 (f"{month}-01",),
             )

@@ -17,6 +17,214 @@
   </div>
 </section>
 
+<!-- Money flow Sankey: income (account · category) → total → spend (category) -->
+<section>
+  <div class="card">
+    <h3>Money flow — {{ month_label }}</h3>
+    {% if sankey.income or sankey.spend %}
+    <div id="sankey-chart" style="height:560px"></div>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"
+            integrity="sha384-cCVCZkAjYNxaYKbM8lsArLznDF/SvMFr1jcZrvOpSTCa0W40ZAdLzHCEulnUa5i7"
+            crossorigin="anonymous"></script>
+    <script>
+      (function () {
+        const data = {{ sankey | tojson }};
+        const income = data.income || [];
+        const spend = data.spend || [];
+        const accounts = data.accounts || [];   // 4th stage: spend by account
+        const catLinks = data.links || [];      // category → account flows
+        const saved = data.saved || 0;          // surplus: green outflow, bottom of spend column
+        const withdraw = data.withdraw || 0;    // deficit: grey inflow, bottom of source column
+        const hasSaved = saved > 0;
+        const hasWithdraw = withdraw > 0;
+        // Spend categories flagged as investments render savings-green
+        // (money moved, not spent) — same color as the Saved flow.
+        const greenCats = {};
+        spend.forEach(function (r) {
+          if (r.investment) { greenCats[r.label] = true; }
+        });
+
+        // ── Nodes. Index order = top-to-bottom order per column.
+        // Column 0: income sources (+ Withdraw pinned bottom)
+        // Column 1: single "All money" bar
+        // Column 2: spend categories (+ Saved pinned bottom)
+        // Column 3: spending accounts (name •mask)
+        // Flows over AMOUNT_LABEL_MIN get their amount on a second label line
+        // (<br> renders as a line break in plotly sankey node labels).
+        const AMOUNT_LABEL_MIN = 2500;
+        function withAmount(label, value) {
+          if (!(value > AMOUNT_LABEL_MIN)) { return label; }
+          return label + '<br>$' +
+            value.toLocaleString('en-US', {maximumFractionDigits: 0});
+        }
+        const nodes = [];
+        const catIdx = {};                  // category label → node index
+        income.forEach(function (r) {
+          nodes.push({label: withAmount(r.label, r.value), value: r.value,
+                      color: '#0071e3', col: 0});
+        });
+        if (hasWithdraw) {
+          nodes.push({label: withAmount('Withdraw', withdraw), value: withdraw,
+                      color: '#8e8e93', col: 0});
+        }
+        const middleIdx = nodes.length;
+        nodes.push({label: 'All money', value: 0, color: '#6e6e73', col: 1});
+        spend.forEach(function (r) {
+          catIdx[r.label] = nodes.length;
+          nodes.push({label: withAmount(r.label, r.value), value: r.value,
+                      color: greenCats[r.label] ? '#1a8a3c' : '#c0392b', col: 2});
+        });
+        let savedIdx = -1;
+        if (hasSaved) {
+          savedIdx = nodes.length;
+          nodes.push({label: withAmount('Saved', saved), value: saved,
+                      color: '#1a8a3c', col: 2});
+        }
+        const acctIdx = {};                 // account label → node index
+        accounts.forEach(function (r) {
+          acctIdx[r.label] = nodes.length;
+          nodes.push({label: withAmount(r.label, r.value), value: r.value,
+                      color: r.investment ? '#1a8a3c' : '#c0392b', col: 3});
+        });
+
+        const links = [];
+        income.forEach(function (r, i) {
+          links.push({source: i, target: middleIdx, value: r.value,
+                      color: 'rgba(0,113,227,0.30)'});
+        });
+        if (hasWithdraw) {
+          links.push({source: income.length, target: middleIdx, value: withdraw,
+                      color: 'rgba(142,142,147,0.30)'});
+        }
+        spend.forEach(function (r) {
+          links.push({source: middleIdx, target: catIdx[r.label], value: r.value,
+                      color: greenCats[r.label]
+                        ? 'rgba(26,138,60,0.30)' : 'rgba(192,57,43,0.30)'});
+        });
+        if (hasSaved) {
+          links.push({source: middleIdx, target: savedIdx, value: saved,
+                      color: 'rgba(26,138,60,0.30)'});
+        }
+        catLinks.forEach(function (l) {
+          if (catIdx[l.category] === undefined || acctIdx[l.account] === undefined) { return; }
+          links.push({source: catIdx[l.category], target: acctIdx[l.account],
+                      value: l.value,
+                      color: greenCats[l.category]
+                        ? 'rgba(26,138,60,0.30)' : 'rgba(192,57,43,0.30)'});
+        });
+
+        // ── Fixed layout. Plotly's node heights under arrangement:'fixed' are
+        // value × scale, where scale = (plotH − pad·(kmax−1)) / maxColumnSum —
+        // and node.y is the node's CENTER as a fraction of plot height
+        // (empirically verified against plotly.js 2.35.2). We replicate that
+        // model so positions and heights agree exactly: each outer column
+        // stacks top→bottom, Saved/Withdraw balance the columns to maxSum.
+        const el = document.getElementById('sankey-chart');
+        const marginT = 10, marginB = 10, pad = 14, thickness = 22;
+        const plotH = (el.clientHeight || 560) - marginT - marginB;
+        const leftSum = income.reduce(function (s, r) { return s + r.value; }, 0) + withdraw;
+        const rightSum = spend.reduce(function (s, r) { return s + r.value; }, 0) + saved;
+        const maxSum = Math.max(leftSum, rightSum, 1);
+        const kmax = Math.max(income.length + (hasWithdraw ? 1 : 0),
+                              spend.length + (hasSaved ? 1 : 0),
+                              accounts.length, 1);
+        const scale = (plotH - pad * (kmax - 1)) / maxSum;
+
+        [0, 2, 3].forEach(function (c) {
+          let yTop = 0;
+          nodes.filter(function (n) { return n.col === c; }).forEach(function (n) {
+            const h = n.value * scale;
+            n.centerY = yTop + h / 2;
+            yTop += h + pad;
+          });
+        });
+        nodes.filter(function (n) { return n.col === 1; })
+             .forEach(function (n) { n.centerY = plotH / 2; });
+
+        const trace = {
+          type: 'sankey',
+          orientation: 'h',
+          arrangement: 'fixed',
+          node: {
+            pad: pad,
+            thickness: thickness,
+            line: {color: '#e5e5ea', width: 1},
+            label: nodes.map(function (n) { return n.label; }),
+            color: nodes.map(function (n) { return n.color; }),
+            x: nodes.map(function (n) {
+              return [0.001, 0.34, 0.67, 0.999][n.col];
+            }),
+            y: nodes.map(function (n) { return n.centerY / plotH; }),
+          },
+          link: {
+            source: links.map(function (l) { return l.source; }),
+            target: links.map(function (l) { return l.target; }),
+            value: links.map(function (l) { return l.value; }),
+            color: links.map(function (l) { return l.color; }),
+          },
+        };
+        const layout = {
+          font: {size: 12, color: '#1d1d1f'},
+          margin: {l: 10, r: 10, t: marginT, b: marginB},
+        };
+        Plotly.newPlot(el, [trace], layout, {responsive: true, displayModeBar: false})
+          .then(function (gd) {
+            // ── Second pass: re-stack columns from the ACTUAL rendered bar
+            // heights (read from the DOM) so the layout can never overlap or
+            // overflow, whatever height model plotly applied. The first-pass
+            // estimate above is just the initial paint.
+            const realH = gd._fullLayout._size.h;
+            const groups = gd.querySelectorAll('.sankey-node');
+            const heights = [];
+            for (let i = 0; i < groups.length; i++) {
+              const r = groups[i].querySelector('.node-rect');
+              heights.push(r ? parseFloat(r.getAttribute('height')) : 0);
+            }
+            [0, 2, 3].forEach(function (c) {
+              const col = [];
+              nodes.forEach(function (n, i) {
+                if (n.col === c) { col.push(i); }
+              });
+              if (!col.length) { return; }
+              const total = col.reduce(function (s, i) { return s + heights[i]; }, 0);
+              // distribute leftover space as gaps, capped at `pad` for looks
+              const gap = Math.min(
+                pad,
+                (realH - total) / Math.max(col.length - 1, 1)
+              );
+              let yTop = 0;
+              col.forEach(function (i) {
+                nodes[i].centerY = yTop + heights[i] / 2;
+                yTop += heights[i] + gap;
+              });
+            });
+            nodes.filter(function (n) { return n.col === 1; })
+                 .forEach(function (n) { n.centerY = realH / 2; });
+            trace.node.y = nodes.map(function (n) { return n.centerY / realH; });
+            // full redraw (NOT react — its transition path misbehaves on
+            // sankey with multiline labels)
+            return Plotly.newPlot(
+              el,
+              [trace],
+              layout,
+              {responsive: true, displayModeBar: false}
+            );
+          });
+      })();
+    </script>
+    <p class="muted" style="font-size:12px;margin-top:10px">
+      Left: income by account and category → middle: money in flow → spending by
+      category → right: which accounts the spending hit. <strong>Saved</strong> (green) is income
+      that wasn't spent; overspent months add a grey <strong>Withdraw</strong> inflow on the left.
+      Investment contributions are shown in green (savings, not spending). Internal transfers
+      and credit card payments are excluded.
+    </p>
+    {% else %}
+      <div class="empty">No income or spending data for {{ month_label }}.</div>
+    {% endif %}
+  </div>
+</section>
+
 <!-- Monthly cash flow -->
 <section>
   <div class="card">

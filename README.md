@@ -35,6 +35,11 @@ local, no monthly fee and no third party holding onto your data.
   category/account filters, saved search views, and a live total for the
   current filter.
 - Transaction detail page: override category, add a note, add/remove tags.
+- Money-flow Sankey diagram on the reports page: income by account (with last-4
+  mask) and category → total → spending by category → which accounts the
+  spending hit. Unspent income shows as a green "Saved" flow, overspent months
+  add a grey "Withdraw" inflow; investment contributions stay in the diagram
+  in savings-green but are excluded from the spend chart (Plotly, SRI-pinned).
 - Spend-by-category bar chart and month-over-month cash-flow report; report
   categories link through to the filtered transactions list.
 - Budget tracking: set per-category monthly limits and track progress.

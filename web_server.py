@@ -214,6 +214,90 @@ def reports_page():
     spend = analytics.spend_by_category(month)
     income = analytics.income_by_category(month)
     budgets = analytics.budget_status(month)
+    income_acct = analytics.income_by_account_category(month)
+    spend_pairs = analytics.spend_by_category_account(month)
+
+    # Investment contributions aren't consumption — hide them from the spend
+    # bar chart (they'd inflate "spending"). They stay in the Sankey, flagged
+    # so the template renders them savings-green instead of spend-red.
+    spend = [
+        r
+        for r in spend
+        if (r["category"] or "").upper() != analytics.INVESTMENT_CATEGORY
+    ]
+
+    # Sankey diagram data: income (account + category) → one middle bar →
+    # spend categories → spending accounts. Category and account node totals
+    # are derived from the same rounded links so every column conserves flow.
+    def _acct_label(row: dict) -> str:
+        acct = row["account_name"]
+        if row.get("account_mask"):
+            acct = f"{acct} •{row['account_mask']}"
+        return acct
+
+    spend_links = []
+    spend_by_cat: dict[str, float] = {}
+    spend_by_acct: dict[str, float] = {}
+    investment_cats: set[str] = set()
+    acct_all_investment: dict[str, bool] = {}
+    for r in spend_pairs:
+        value = round(float(r["total_spend"]), 2)
+        if value <= 0:
+            continue
+        cat = r["category"] or "Uncategorized"
+        acct = _acct_label(r)
+        is_investment = (r["category"] or "").upper() == analytics.INVESTMENT_CATEGORY
+        if is_investment:
+            investment_cats.add(cat)
+        # an account is savings-green only if EVERY flow into it is investment
+        acct_all_investment[acct] = (
+            acct_all_investment.get(acct, True) and is_investment
+        )
+        spend_links.append({"category": cat, "account": acct, "value": value})
+        spend_by_cat[cat] = round(spend_by_cat.get(cat, 0.0) + value, 2)
+        spend_by_acct[acct] = round(spend_by_acct.get(acct, 0.0) + value, 2)
+
+    sankey = {
+        "income": [
+            {
+                "label": f"{_acct_label(r)} · {r['category'] or 'Uncategorized'}",
+                "value": round(float(r["total_income"]), 2),
+            }
+            for r in income_acct
+        ],
+        # Spend categories sorted by value desc — but investment categories
+        # are pinned to the bottom of the column, grouped with the Saved node.
+        "spend": [
+            {
+                "label": label,
+                "value": value,
+                "investment": label in investment_cats,
+            }
+            for label, value in sorted(
+                spend_by_cat.items(),
+                key=lambda kv: (kv[0] in investment_cats, -kv[1]),
+            )
+        ],
+        "accounts": [
+            {
+                "label": label,
+                "value": value,
+                "investment": acct_all_investment.get(label, False),
+            }
+            for label, value in sorted(spend_by_acct.items(), key=lambda kv: -kv[1])
+        ],
+        "links": spend_links,
+    }
+    # Surplus becomes the green "Saved" outflow; a deficit becomes a grey
+    # "Withdraw" inflow on the source side. Neither key is set when balanced
+    # (Sankey link values can't be negative, so each month has at most one).
+    income_total = sum(r["value"] for r in sankey["income"])
+    spend_total = sum(r["value"] for r in sankey["spend"])
+    surplus = round(income_total - spend_total, 2)
+    if surplus > 0:
+        sankey["saved"] = surplus
+    elif surplus < 0:
+        sankey["withdraw"] = -surplus
 
     max_spend = float(max((r["total_spend"] for r in spend), default=1) or 1)
     for r in spend:
@@ -229,6 +313,7 @@ def reports_page():
         spend=spend,
         income=income,
         budgets=budgets,
+        sankey=sankey,
         month=month,
         month_label=month_label,
         prev_month=prev_m,
