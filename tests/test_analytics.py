@@ -262,6 +262,112 @@ class TestIncomeByCategory:
         assert "NOT IN" in sql
 
 
+class TestIncomeByAccountCategory:
+    """income_by_account_category() — Sankey source stage (account + category split)."""
+
+    _ROWS = [
+        {
+            "account_id": "acct_1",
+            "account_name": "Chase Checking",
+            "account_mask": "1234",
+            "category": "INCOME_WAGES",
+            "total_income": 5000.00,
+            "txn_count": 2,
+        },
+        {
+            "account_id": "acct_2",
+            "account_name": "Chase Checking",
+            "account_mask": "5678",
+            "category": "TRANSFER_IN",
+            "total_income": 200.00,
+            "txn_count": 1,
+        },
+    ]
+
+    def test_returns_rows_with_account_and_category(self, mock_db):
+        mock_db.fetchall.return_value = self._ROWS
+
+        result = analytics.income_by_account_category("2026-06")
+
+        assert result == self._ROWS
+        assert result[0]["account_name"] == "Chase Checking"
+
+    def test_passes_month_param(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-03")
+
+        params = mock_db.execute.call_args[0][1]
+        assert "2026-03-01" in str(params[0])
+
+    def test_groups_by_account_and_effective_category(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "GROUP BY t.account_id" in sql
+        assert "COALESCE(co.category" in sql  # grouped on effective category
+
+    def test_same_named_accounts_are_separate_nodes(self, mock_db):
+        """Grouping on account_id (not just name) so two 'Checking' accounts
+        with different masks stay distinct Sankey sources."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "GROUP BY t.account_id" in sql
+        assert "a.name" in sql.split("GROUP BY")[1]  # name still selected/grouped
+
+    def test_selects_account_mask(self, mock_db):
+        """Last-4 mask comes back for the Sankey source label."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "a.mask AS account_mask" in sql
+
+    def test_joins_accounts_for_account_names(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "JOIN accounts a" in sql
+        assert "a.name AS account_name" in sql
+
+    def test_only_credits_and_negated_for_display(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "amount < 0" in sql
+        assert "SUM(-t.amount)" in sql
+
+    def test_excludes_internal_categories(self, mock_db):
+        """Internal transfers/credit payments must not appear as income sources."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "INTERNAL TRANSFER" in sql
+        assert "CREDIT PAYMENT" in sql
+        assert "NOT IN" in sql
+
+    def test_excludes_superseded_pending(self, mock_db):
+        """Same pending dedupe as every other report query."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "pending_transaction_id" in sql
+
+
 class TestCategoryOverrideConsistency:
     """
     Cross-feature: all analytics functions that show category must use
@@ -362,6 +468,65 @@ class TestCategoryOverrideConsistency:
             result = analytics.resolve_category(txn)
         assert result == "LOAN_PAYMENT"
         assert result != "TRANSFER_OUT"
+
+
+class TestSpendByCategoryAccount:
+    """spend_by_category_account() — Sankey categories→accounts stage."""
+
+    def test_returns_pairs_with_account_and_category(self, mock_db):
+        mock_db.fetchall.return_value = [
+            {
+                "account_id": "a1",
+                "account_name": "Chase Card",
+                "account_mask": "1111",
+                "category": "FOOD_AND_DRINK",
+                "total_spend": 350.0,
+                "txn_count": 8,
+            }
+        ]
+
+        result = analytics.spend_by_category_account("2026-06")
+
+        assert result[0]["account_name"] == "Chase Card"
+        assert result[0]["category"] == "FOOD_AND_DRINK"
+
+    def test_passes_month_param(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category_account("2026-03")
+
+        params = mock_db.execute.call_args[0][1]
+        assert "2026-03-01" in str(params[0])
+
+    def test_groups_by_category_and_account(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category_account("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "GROUP BY t.account_id" in sql
+        assert "COALESCE(co.category" in sql
+
+    def test_only_debits_untouched_amounts(self, mock_db):
+        """Spend = positive raw amounts, NOT negated (unlike income queries)."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category_account("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "t.amount > 0" in sql
+        assert "SUM(t.amount)" in sql
+        assert "SUM(-t.amount)" not in sql
+
+    def test_excludes_internal_categories_and_superseded(self, mock_db):
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category_account("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "INTERNAL TRANSFER" in sql
+        assert "CREDIT PAYMENT" in sql
+        assert "pending_transaction_id" in sql
 
 
 class TestMonthlySummary:
@@ -1325,3 +1490,7 @@ class TestInternalCategoryFiltering:
     def test_internal_categories_constant_contains_expected_values(self):
         assert "INTERNAL TRANSFER" in analytics.INTERNAL_CATEGORIES
         assert "CREDIT PAYMENT" in analytics.INTERNAL_CATEGORIES
+
+    def test_investment_category_constant(self):
+        """INVESTMENT is special-cased: hidden from spend chart, green in Sankey."""
+        assert analytics.INVESTMENT_CATEGORY == "INVESTMENT"
