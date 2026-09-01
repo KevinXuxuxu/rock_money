@@ -167,6 +167,36 @@
           font: {size: 12, color: '#1d1d1f'},
           margin: {l: 10, r: 10, t: marginT, b: marginB},
         };
+        // ── Column-2 (spend categories) labels: plotly only places labels
+        // left-of-bar for the rightmost column. Reposition the category
+        // labels to the left using the exact transform plotly uses for sink
+        // labels (translate(-3.5, y) + text-anchor:end), so styling and hover
+        // (which reads data, not the DOM) stay intact.
+        function flipCategoryLabels() {
+          const groups = el.querySelectorAll('.sankey-node');
+          if (!groups.length) { return false; }
+          for (let i = 0; i < groups.length; i++) {
+            if (!nodes[i] || nodes[i].col !== 2) { continue; }
+            const t = groups[i].querySelector('.node-label');
+            if (!t) { continue; }
+            const m = (t.getAttribute('transform') || '')
+                      .match(/translate\(([-\d.]+)[, ]([-.\d]+)\)/);
+            const y = m ? m[2] : '0';
+            t.setAttribute('transform', 'translate(-3.5,' + y + ')');
+            t.setAttribute('text-anchor', 'end');
+          }
+          return true;
+        }
+        function flipWhenReady(tries) {
+          if (flipCategoryLabels() || tries <= 0) { return; }
+          setTimeout(function () { flipWhenReady(tries - 1); }, 100);
+        }
+        let resizeTimer = null;
+        window.addEventListener('resize', function () {
+          if (resizeTimer) { clearTimeout(resizeTimer); }
+          resizeTimer = setTimeout(function () { flipWhenReady(10); }, 200);
+        });
+
         Plotly.newPlot(el, [trace], layout, {responsive: true, displayModeBar: false})
           .then(function (gd) {
             // ── Second pass: re-stack columns from the ACTUAL rendered bar
@@ -208,7 +238,7 @@
               [trace],
               layout,
               {responsive: true, displayModeBar: false}
-            );
+            ).then(function () { flipWhenReady(20); });
           });
       })();
     </script>
