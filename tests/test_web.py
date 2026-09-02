@@ -1032,6 +1032,84 @@ class TestReportsPage:
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
+    def test_sankey_label_stage_groups_accounts(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """5th stage: accounts merge into per-label nodes; unlabeled accounts
+        group under a grey 'Unlabeled' node pinned last."""
+        mock_summary.return_value = []
+        mock_spend.return_value = []
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = [
+            {  # Everyday card #1
+                "account_id": "a1",
+                "account_name": "Chase Card",
+                "account_mask": "1111",
+                "account_label": "Everyday",
+                "category": "FOOD_AND_DRINK",
+                "total_spend": 200.0,
+                "txn_count": 4,
+            },
+            {  # Everyday card #2 — same label, merges into one node
+                "account_id": "a2",
+                "account_name": "Amex Card",
+                "account_mask": "2222",
+                "account_label": "Everyday",
+                "category": "FOOD_AND_DRINK",
+                "total_spend": 100.0,
+                "txn_count": 2,
+            },
+            {  # no label → Unlabeled
+                "account_id": "a3",
+                "account_name": "Citi Card",
+                "account_mask": "3333",
+                "account_label": None,
+                "category": "RENT",
+                "total_spend": 2500.0,
+                "txn_count": 1,
+            },
+        ]
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a9",
+                "account_name": "Checking",
+                "account_mask": "9999",
+                "category": "INCOME_WAGES",
+                "total_income": 2800.0,
+                "txn_count": 1,
+            }
+        ]
+
+        resp = client.get("/reports")
+
+        # label nodes: Unlabeled 2500 (pinned last), Everyday 300
+        spend_labels = resp.data.split(b'"spend_labels": [', 1)[1].split(b"]", 1)[0]
+        assert b'"label": "Everyday"' in spend_labels
+        assert spend_labels.index(b'"Everyday"') < spend_labels.index(b'"Unlabeled"')
+        assert b'"unlabeled": true' in spend_labels
+        assert b'"unlabeled": false' in spend_labels
+
+        # account → label links carry per-account totals (conservation)
+        acct_links = resp.data.split(b'"account_links": [', 1)[1].split(b"]", 1)[0]
+        assert b'"Chase Card \\u20221111"' in acct_links
+        assert b'"Amex Card \\u20222222"' in acct_links
+        assert b'"label": "Everyday"' in acct_links
+        assert b'"label": "Unlabeled"' in acct_links
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
     def test_sankey_saved_node_when_surplus(
         self,
         mock_summary,

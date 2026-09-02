@@ -250,6 +250,7 @@ def reports_page():
     spend_links = []
     spend_by_cat: dict[str, float] = {}
     spend_by_acct: dict[str, float] = {}
+    label_by_acct: dict[str, str] = {}
     investment_cats: set[str] = set()
     acct_all_investment: dict[str, bool] = {}
     for r in spend_pairs:
@@ -268,6 +269,21 @@ def reports_page():
         spend_links.append({"category": cat, "account": acct, "value": value})
         spend_by_cat[cat] = round(spend_by_cat.get(cat, 0.0) + value, 2)
         spend_by_acct[acct] = round(spend_by_acct.get(acct, 0.0) + value, 2)
+        label_by_acct[acct] = r.get("account_label") or "Unlabeled"
+
+    # 5th stage: group each account's spending under the account's user label
+    # (accounts sharing a label merge into one node). Unlabeled accounts flow
+    # into a grey "Unlabeled" node, pinned last.
+    UNLABELED = "Unlabeled"
+    account_links = [
+        {"account": acct, "label": label_by_acct.get(acct, UNLABELED), "value": value}
+        for acct, value in spend_by_acct.items()
+    ]
+    spend_by_label: dict[str, float] = {}
+    for link in account_links:
+        spend_by_label[link["label"]] = round(
+            spend_by_label.get(link["label"], 0.0) + link["value"], 2
+        )
 
     sankey = {
         "income": [
@@ -298,7 +314,21 @@ def reports_page():
             }
             for label, value in sorted(spend_by_acct.items(), key=lambda kv: -kv[1])
         ],
+        # Spend grouped by the account's user label — unlabeled accounts
+        # merge into a grey "Unlabeled" node pinned to the bottom.
+        "spend_labels": [
+            {
+                "label": label,
+                "value": value,
+                "unlabeled": label == UNLABELED,
+            }
+            for label, value in sorted(
+                spend_by_label.items(),
+                key=lambda kv: (kv[0] == UNLABELED, -kv[1]),
+            )
+        ],
         "links": spend_links,
+        "account_links": account_links,
     }
     # Surplus becomes the green "Saved" outflow; a deficit becomes a grey
     # "Withdraw" inflow on the source side. Neither key is set when balanced
