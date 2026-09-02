@@ -32,7 +32,9 @@
         const income = data.income || [];
         const spend = data.spend || [];
         const accounts = data.accounts || [];   // 4th stage: spend by account
+        const spendLabels = data.spend_labels || []; // 5th stage: spend by account label
         const catLinks = data.links || [];      // category → account flows
+        const acctLinks = data.account_links || [];  // account → label flows
         const saved = data.saved || 0;          // surplus: green outflow, bottom of spend column
         const withdraw = data.withdraw || 0;    // deficit: grey inflow, bottom of source column
         const hasSaved = saved > 0;
@@ -47,8 +49,10 @@
         // ── Nodes. Index order = top-to-bottom order per column.
         // Column 0: income sources (+ Withdraw pinned bottom)
         // Column 1: single "All money" bar
-        // Column 2: spend categories (+ Saved pinned bottom)
+        // Column 2: spend categories (+ Saved & investments pinned bottom)
         // Column 3: spending accounts (name •mask)
+        // Column 4: spend grouped by the account's user label
+        //           (grey "Unlabeled" pinned bottom)
         // Flows over AMOUNT_LABEL_MIN get their amount on a second label line
         // (<br> renders as a line break in plotly sankey node labels).
         const AMOUNT_LABEL_MIN = 2500;
@@ -86,6 +90,14 @@
           nodes.push({label: withAmount(r.label, r.value), value: r.value,
                       color: r.investment ? '#1a8a3c' : '#c0392b', col: 3});
         });
+        const greyLabels = {};              // label nodes rendered grey
+        const labelIdx = {};               // label name → node index
+        spendLabels.forEach(function (r) {
+          labelIdx[r.label] = nodes.length;
+          if (r.unlabeled) { greyLabels[r.label] = true; }
+          nodes.push({label: withAmount(r.label, r.value), value: r.value,
+                      color: r.unlabeled ? '#8e8e93' : '#c0392b', col: 4});
+        });
 
         const links = [];
         income.forEach(function (r, i) {
@@ -112,6 +124,13 @@
                       color: greenCats[l.category]
                         ? 'rgba(26,138,60,0.30)' : 'rgba(192,57,43,0.30)'});
         });
+        acctLinks.forEach(function (l) {
+          if (acctIdx[l.account] === undefined || labelIdx[l.label] === undefined) { return; }
+          links.push({source: acctIdx[l.account], target: labelIdx[l.label],
+                      value: l.value,
+                      color: greyLabels[l.label]
+                        ? 'rgba(142,142,147,0.30)' : 'rgba(192,57,43,0.30)'});
+        });
 
         // ── Fixed layout. Plotly's node heights under arrangement:'fixed' are
         // value × scale, where scale = (plotH − pad·(kmax−1)) / maxColumnSum —
@@ -127,10 +146,10 @@
         const maxSum = Math.max(leftSum, rightSum, 1);
         const kmax = Math.max(income.length + (hasWithdraw ? 1 : 0),
                               spend.length + (hasSaved ? 1 : 0),
-                              accounts.length, 1);
+                              accounts.length, spendLabels.length, 1);
         const scale = (plotH - pad * (kmax - 1)) / maxSum;
 
-        [0, 2, 3].forEach(function (c) {
+        [0, 2, 3, 4].forEach(function (c) {
           let yTop = 0;
           nodes.filter(function (n) { return n.col === c; }).forEach(function (n) {
             const h = n.value * scale;
@@ -152,7 +171,7 @@
             label: nodes.map(function (n) { return n.label; }),
             color: nodes.map(function (n) { return n.color; }),
             x: nodes.map(function (n) {
-              return [0.001, 0.34, 0.67, 0.999][n.col];
+              return [0.001, 0.25, 0.5, 0.75, 0.999][n.col];
             }),
             y: nodes.map(function (n) { return n.centerY / plotH; }),
           },
@@ -210,7 +229,7 @@
               const r = groups[i].querySelector('.node-rect');
               heights.push(r ? parseFloat(r.getAttribute('height')) : 0);
             }
-            [0, 2, 3].forEach(function (c) {
+            [0, 2, 3, 4].forEach(function (c) {
               const col = [];
               nodes.forEach(function (n, i) {
                 if (n.col === c) { col.push(i); }
@@ -244,8 +263,9 @@
     </script>
     <p class="muted" style="font-size:12px;margin-top:10px">
       Left: income by account and category → middle: money in flow → spending by
-      category → right: which accounts the spending hit. <strong>Saved</strong> (green) is income
-      that wasn't spent; overspent months add a grey <strong>Withdraw</strong> inflow on the left.
+      category → which accounts the spending hit → grouped by account label.
+      <strong>Saved</strong> (green) is income that wasn't spent; overspent months add a grey
+      <strong>Withdraw</strong> inflow on the left.
       Investment contributions are shown in green (savings, not spending). Internal transfers
       and credit card payments are excluded.
     </p>

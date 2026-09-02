@@ -228,6 +228,7 @@ def spend_by_category_account(month: str) -> list[dict]:
                 SELECT t.account_id,
                        a.name AS account_name,
                        a.mask AS account_mask,
+                       a.label AS account_label,
                        COALESCE(co.category, t.personal_finance_category) AS category,
                        SUM(t.amount) AS total_spend,
                        COUNT(*)       AS txn_count
@@ -241,7 +242,7 @@ def spend_by_category_account(month: str) -> list[dict]:
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
                       NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
-                GROUP BY t.account_id, a.name, a.mask,
+                GROUP BY t.account_id, a.name, a.mask, a.label,
                          COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_spend DESC
             """,

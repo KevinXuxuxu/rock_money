@@ -527,6 +527,15 @@ class TestSpendByCategoryAccount:
         assert "SUM(t.amount)" in sql
         assert "SUM(-t.amount)" not in sql
 
+    def test_selects_account_label(self, mock_db):
+        """The account's user label comes back for the Sankey label stage."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category_account("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "a.label AS account_label" in sql
+
     def test_excludes_internal_categories_and_superseded(self, mock_db):
         mock_db.fetchall.return_value = []
 
