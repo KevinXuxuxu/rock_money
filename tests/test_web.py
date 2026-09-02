@@ -147,6 +147,47 @@ class TestAccountsPage:
         assert resp.status_code == 200
         assert b"No accounts" in resp.data
 
+    @patch("analytics.get_accounts")
+    def test_label_shown_and_editable(self, mock_accts, client):
+        """Labels render (and prefill) in the Label column; the bank name stays
+        the primary display name in the Account column."""
+        mock_accts.return_value = [
+            make_account(account_id="acct_1", name="Total Checking", label="Spending"),
+            make_account(account_id="acct_2", name="Brokerage", label=None),
+        ]
+        resp = client.get("/accounts")
+
+        # label visible + prefilled in its edit form; bank name stays primary
+        assert b"Spending" in resp.data
+        assert b'value="Spending"' in resp.data
+        assert b"Total Checking" in resp.data
+        assert b"Brokerage" in resp.data
+        # both rows expose the inline label form
+        assert resp.data.count(b"/label") >= 2
+        assert b"add label" in resp.data  # placeholder in the edit form
+
+    @patch("db.set_account_label")
+    def test_set_label_redirects(self, mock_set, client):
+        mock_set.return_value = True
+        resp = client.post("/accounts/acct_1/label", data={"label": "  Spending  "})
+        assert resp.status_code == 302
+        assert "/accounts" in resp.headers["Location"]
+        mock_set.assert_called_once_with("acct_1", "Spending")  # stripped
+
+    @patch("db.set_account_label")
+    def test_clear_label_passes_empty_string(self, mock_set, client):
+        mock_set.return_value = True
+        resp = client.post("/accounts/acct_1/label", data={"label": ""})
+        assert resp.status_code == 302
+        mock_set.assert_called_once_with("acct_1", "")
+
+    @patch("db.set_account_label")
+    def test_set_label_unknown_account_flashes_error(self, mock_set, client):
+        mock_set.return_value = False
+        resp = client.post("/accounts/nope/label", data={"label": "x"})
+        assert resp.status_code == 302
+        mock_set.assert_called_once_with("nope", "x")
+
 
 class TestSyncAccounts:
     @patch("sync.sync_all")

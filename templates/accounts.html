@@ -32,6 +32,7 @@
         <thead>
           <tr>
             <th>Account</th>
+            <th>Label</th>
             <th>Type</th>
             <th>Mask</th>
             <th class="num">Transactions</th>
@@ -44,7 +45,7 @@
           {% set group = group | list %}
           {% set inst_name = group[0].institution_name or item_id %}
           <tr style="background:var(--bg)">
-            <td colspan="5" style="padding:10px 12px;font-weight:600;font-size:13px;color:var(--muted)">
+            <td colspan="6" style="padding:10px 12px;font-weight:600;font-size:13px;color:var(--muted)">
               {{ inst_name }}
             </td>
             <td style="padding:6px 12px;text-align:right">
@@ -65,6 +66,16 @@
               {% if a.official_name and a.official_name != a.name %}
               <div class="muted" style="font-size:12px">{{ a.official_name }}</div>
               {% endif %}
+            </td>
+            <td>
+              <form method="post" action="/accounts/{{ a.account_id }}/label"
+                    style="display:flex;gap:6px;align-items:center">
+                <input type="text" name="label" value="{{ a.label or '' }}"
+                       placeholder="add label…" maxlength="60"
+                       style="border:1px solid var(--border);border-radius:6px;padding:4px 8px;
+                              font-size:13px;width:120px;background:white;color:var(--text)">
+                <button type="submit" class="btn-icon" title="Save label">✓</button>
+              </form>
             </td>
             <td>{{ a.subtype or a.type }}</td>
             <td class="mono">{{ a.mask or '—' }}</td>

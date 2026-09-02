@@ -1,5 +1,7 @@
 """Tests for db.py — category overrides, rules, notes, tags, views."""
 
+from unittest.mock import patch
+
 import db
 
 
@@ -179,6 +181,51 @@ class TestCategoryRules:
         sql, params = mock_db.execute.call_args[0]
         assert "match_pattern ILIKE %s OR category ILIKE %s" in sql
         assert params == ["%net%", "%net%"]
+
+
+class TestAccountLabels:
+    """set_account_label"""
+
+    def test_update_sql_uses_nullif_for_clear(self, mock_db):
+        mock_db.rowcount = 1
+
+        assert db.set_account_label("acct_1", "Spending") is True
+
+        sql, params = mock_db.execute.call_args[0]
+        assert "UPDATE accounts" in sql
+        assert "NULLIF(%s, '')" in sql  # empty string → NULL, not ''
+        assert "updated_at = NOW()" in sql
+        assert params == ("Spending", "acct_1")
+
+    def test_returns_false_when_account_missing(self, mock_db):
+        mock_db.rowcount = 0
+
+        assert db.set_account_label("nope", "x") is False
+
+    def test_whitespace_label_normalized_to_empty(self, mock_db):
+        """Whitespace-only labels clear the column (NULL via NULLIF)."""
+        mock_db.rowcount = 1
+
+        db.set_account_label("acct_1", "   ")
+
+        params = mock_db.execute.call_args[0][1]
+        assert params == ("", "acct_1")
+
+    def test_sync_upsert_never_touches_label(self, mock_db):
+        """upsert_accounts must not clobber user labels on conflict."""
+        with patch("psycopg2.extras.execute_values") as mock_ev:
+            db.upsert_accounts(
+                [
+                    {
+                        "account_id": "a1",
+                        "item_id": "i1",
+                        "name": "X",
+                        "type": "depository",
+                    }
+                ]
+            )
+            sql = mock_ev.call_args[0][1]
+        assert "label" not in sql
 
 
 class TestTransactionNotes:

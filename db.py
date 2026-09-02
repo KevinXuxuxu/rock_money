@@ -148,6 +148,25 @@ def upsert_accounts(accounts: list[dict]) -> None:
             )
 
 
+def set_account_label(account_id: str, label: str) -> bool:
+    """
+    Set (or clear, when empty/whitespace) the user-defined label on an account.
+    Sync upserts never touch this column, so labels survive every sync.
+    Returns True if the account exists and was updated.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE accounts
+                SET label = NULLIF(%s, ''), updated_at = NOW()
+                WHERE account_id = %s
+                """,
+                (label.strip(), account_id),
+            )
+            return cur.rowcount > 0
+
+
 # ── Transactions ───────────────────────────────────────────────────────────────
 
 

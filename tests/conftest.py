@@ -87,6 +87,7 @@ def make_account(**overrides) -> dict:
         "type": "depository",
         "subtype": "checking",
         "mask": "1234",
+        "label": None,
         "item_id": "item_001",
         "institution_name": "Test Bank",
         "txn_count": 42,

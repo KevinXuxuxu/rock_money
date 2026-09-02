@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     type          TEXT NOT NULL,
     subtype       TEXT,
     mask          TEXT,
+    label         TEXT,  -- ALTER TABLE accounts ADD COLUMN IF NOT EXISTS label TEXT;
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

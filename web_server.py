@@ -116,6 +116,18 @@ def sync_accounts():
     return redirect(url_for("accounts_page"))
 
 
+@app.post("/accounts/<account_id>/label")
+def set_account_label_web(account_id):
+    """Set or clear the user-defined label on a single account."""
+    label = request.form.get("label", "").strip()
+    if db.set_account_label(account_id, label):
+        message = f"Label set to “{label}”." if label else "Label cleared."
+        flash(message, "success")
+    else:
+        flash("Account not found.", "error")
+    return redirect(url_for("accounts_page"))
+
+
 @app.get("/api/link-token")
 def api_link_token():
     import os
