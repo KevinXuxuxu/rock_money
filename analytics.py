@@ -391,7 +391,7 @@ def get_accounts() -> list[dict]:
             cur.execute(
                 """
                 SELECT a.account_id, a.name, a.official_name, a.type, a.subtype,
-                       a.mask, a.item_id, i.institution_name,
+                       a.mask, a.label, a.item_id, i.institution_name,
                        COUNT(t.transaction_id) FILTER (WHERE """
                 + _NOT_SUPERSEDED
                 + """) AS txn_count,
@@ -405,7 +405,7 @@ def get_accounts() -> list[dict]:
                 JOIN items i ON i.item_id = a.item_id
                 LEFT JOIN transactions t ON t.account_id = a.account_id
                 GROUP BY a.account_id, a.name, a.official_name, a.type, a.subtype,
-                         a.mask, a.item_id, i.institution_name
+                         a.mask, a.label, a.item_id, i.institution_name
                 ORDER BY i.institution_name, a.name
             """
             )

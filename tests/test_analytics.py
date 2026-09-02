@@ -136,6 +136,15 @@ class TestGetAccounts:
         assert result[0]["txn_count"] == 5
         assert result[1]["name"] == "Savings"
 
+    def test_selects_user_label(self, mock_db):
+        """The user-defined account label must come back for the accounts page."""
+        mock_db.fetchall.return_value = []
+
+        analytics.get_accounts()
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "a.label" in sql
+
 
 class TestSpendByCategory:
     """Phase 2: spend_by_category()"""
