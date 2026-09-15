@@ -39,17 +39,11 @@
         const withdraw = data.withdraw || 0;    // deficit: grey inflow, bottom of source column
         const hasSaved = saved > 0;
         const hasWithdraw = withdraw > 0;
-        // Spend categories flagged as investments render savings-green
-        // (money moved, not spent) — same color as the Saved flow.
-        const greenCats = {};
-        spend.forEach(function (r) {
-          if (r.investment) { greenCats[r.label] = true; }
-        });
 
         // ── Nodes. Index order = top-to-bottom order per column.
         // Column 0: income sources (+ Withdraw pinned bottom)
         // Column 1: single "All money" bar
-        // Column 2: spend categories (+ Saved & investments pinned bottom)
+        // Column 2: spend categories (+ Saved pinned bottom)
         // Column 3: spending accounts (name •mask)
         // Column 4: spend grouped by the account's user label
         //           (grey "Unlabeled" pinned bottom)
@@ -76,7 +70,7 @@
         spend.forEach(function (r) {
           catIdx[r.label] = nodes.length;
           nodes.push({label: withAmount(r.label, r.value), value: r.value,
-                      color: greenCats[r.label] ? '#1a8a3c' : '#c0392b', col: 2});
+                      color: '#c0392b', col: 2});
         });
         let savedIdx = -1;
         if (hasSaved) {
@@ -88,7 +82,7 @@
         accounts.forEach(function (r) {
           acctIdx[r.label] = nodes.length;
           nodes.push({label: withAmount(r.label, r.value), value: r.value,
-                      color: r.investment ? '#1a8a3c' : '#c0392b', col: 3});
+                      color: '#c0392b', col: 3});
         });
         const greyLabels = {};              // label nodes rendered grey
         const labelIdx = {};               // label name → node index
@@ -110,8 +104,7 @@
         }
         spend.forEach(function (r) {
           links.push({source: middleIdx, target: catIdx[r.label], value: r.value,
-                      color: greenCats[r.label]
-                        ? 'rgba(26,138,60,0.30)' : 'rgba(192,57,43,0.30)'});
+                      color: 'rgba(192,57,43,0.30)'});
         });
         if (hasSaved) {
           links.push({source: middleIdx, target: savedIdx, value: saved,
@@ -120,9 +113,7 @@
         catLinks.forEach(function (l) {
           if (catIdx[l.category] === undefined || acctIdx[l.account] === undefined) { return; }
           links.push({source: catIdx[l.category], target: acctIdx[l.account],
-                      value: l.value,
-                      color: greenCats[l.category]
-                        ? 'rgba(26,138,60,0.30)' : 'rgba(192,57,43,0.30)'});
+                      value: l.value, color: 'rgba(192,57,43,0.30)'});
         });
         acctLinks.forEach(function (l) {
           if (acctIdx[l.account] === undefined || labelIdx[l.label] === undefined) { return; }
@@ -266,8 +257,7 @@
       category → which accounts the spending hit → grouped by account label.
       <strong>Saved</strong> (green) is income that wasn't spent; overspent months add a grey
       <strong>Withdraw</strong> inflow on the left.
-      Investment contributions are shown in green (savings, not spending). Internal transfers
-      and credit card payments are excluded.
+      Internal transfers and credit card payments are excluded.
     </p>
     {% else %}
       <div class="empty">No income or spending data for {{ month_label }}.</div>

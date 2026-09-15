@@ -1303,7 +1303,7 @@ class TestReportsPage:
     @patch("analytics.budget_status")
     @patch("analytics.spend_by_category")
     @patch("analytics.monthly_summary")
-    def test_investment_hidden_from_spend_chart_but_green_in_sankey(
+    def test_investment_excluded_from_spend_chart_and_sankey(
         self,
         mock_summary,
         mock_spend,
@@ -1313,8 +1313,8 @@ class TestReportsPage:
         mock_spend_pairs,
         client,
     ):
-        """INVESTMENT is not consumption: hidden from the spend bar chart but
-        kept in the Sankey payload, flagged for savings-green rendering."""
+        """INVESTMENT is not consumption and not money-in-flow: absent from
+        the spend bar chart and the Sankey alike (it folds into Saved)."""
         mock_summary.return_value = []
         mock_spend.return_value = _spend_rows() + [
             {"category": "INVESTMENT", "total_spend": 3000.0, "txn_count": 2}
@@ -1350,17 +1350,75 @@ class TestReportsPage:
         assert b"INVESTMENT" not in chart
         assert b"FOOD_AND_DRINK" in chart
 
-        # Sankey payload keeps the investment category, flagged green,
-        # flowing into its account node
-        assert b'"investment": true' in resp.data
-        assert b'"Fidelity \\u20228888"' in resp.data
-        # Investment is pinned to the END of the spend list (grouped with
-        # Saved at the bottom), not sorted by value — it's the biggest spend
-        # item here, so value-sort would put it first.
-        spend_array = resp.data.split(b'"spend": [', 1)[1].split(b"]", 1)[0]
-        assert spend_array.index(b'"FOOD_AND_DRINK"') < spend_array.index(
-            b'"INVESTMENT"'
-        )
+        # Sankey payload: no investment category, no investment flag, no
+        # Fidelity account node (its only flow was investment)
+        assert b"INVESTMENT" not in resp.data
+        assert b'"investment"' not in resp.data
+        assert b"Fidelity" not in resp.data
+        # 3430 income - 430 spend = 3000 saved (investment rolled in)
+        assert b'"saved"' in resp.data
+        assert b"3000.0" in resp.data
+
+    @patch("analytics.spend_by_category_account")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.budget_status")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.monthly_summary")
+    def test_investment_excluded_from_income_source(
+        self,
+        mock_summary,
+        mock_spend,
+        mock_budgets,
+        mock_income,
+        mock_income_acct,
+        mock_spend_pairs,
+        client,
+    ):
+        """INVESTMENT credits don't count as income in the Sankey source column."""
+        mock_summary.return_value = []
+        mock_spend.return_value = []
+        mock_budgets.return_value = []
+        mock_income.return_value = []
+        mock_spend_pairs.return_value = [
+            {
+                "account_id": "c1",
+                "account_name": "Chase Card",
+                "account_mask": "1111",
+                "account_label": "Everyday",
+                "category": "RENT",
+                "total_spend": 3000.0,
+                "txn_count": 1,
+            }
+        ]
+        mock_income_acct.return_value = [
+            {
+                "account_id": "a9",
+                "account_name": "Checking",
+                "account_mask": "9999",
+                "category": "INCOME_WAGES",
+                "total_income": 3000.0,
+                "txn_count": 1,
+            },
+            {  # investment credit — must be dropped from the source column
+                "account_id": "a9",
+                "account_name": "Checking",
+                "account_mask": "9999",
+                "category": "INVESTMENT",
+                "total_income": 500.0,
+                "txn_count": 1,
+            },
+        ]
+
+        resp = client.get("/reports")
+
+        # INVESTMENT appears nowhere (bar charts mocked empty; only the sankey
+        # payload could carry it)
+        assert b"INVESTMENT" not in resp.data
+        # 3000 wages - 3000 spend = balanced (the 500 investment credit would
+        # have made a 500 surplus otherwise)
+        assert b'"saved"' not in resp.data
+        assert b'"withdraw"' not in resp.data
 
     @patch("analytics.spend_by_category_account")
     @patch("analytics.income_by_account_category")

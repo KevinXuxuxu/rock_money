@@ -16,8 +16,8 @@ _log = logging.getLogger(__name__)
 INTERNAL_CATEGORIES: frozenset[str] = frozenset({"INTERNAL TRANSFER", "CREDIT PAYMENT"})
 
 # Plaid primary category for brokerage/investment contributions. Not consumption:
-# excluded from the reports spend chart, but kept in the Sankey diagram where it
-# is colored savings-style green (money moved, not spent).
+# excluded from the reports spend chart and the Sankey diagram entirely — the
+# money rolls into the "Saved" surplus (income minus non-investment spending).
 INVESTMENT_CATEGORY = "INVESTMENT"
 
 # Pending transactions ARE counted in all stats — most of them post unchanged.
