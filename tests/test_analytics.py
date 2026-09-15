@@ -1510,5 +1510,5 @@ class TestInternalCategoryFiltering:
         assert "CREDIT PAYMENT" in analytics.INTERNAL_CATEGORIES
 
     def test_investment_category_constant(self):
-        """INVESTMENT is special-cased: hidden from spend chart, green in Sankey."""
+        """INVESTMENT is special-cased: excluded from the spend chart and Sankey."""
         assert analytics.INVESTMENT_CATEGORY == "INVESTMENT"
