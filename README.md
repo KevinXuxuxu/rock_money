@@ -39,7 +39,8 @@ local, no monthly fee and no third party holding onto your data.
   mask) and category → total → spending by category → which accounts the
   spending hit → grouped by account label. Unspent income shows as a green
   "Saved" flow, overspent months add a grey "Withdraw" inflow; investment
-  contributions and internal transfers are excluded (Plotly, SRI-pinned).
+  contributions, internal transfers, and credit-card payments are excluded
+  (Plotly, SRI-pinned).
 - Spend-by-category bar chart and month-over-month cash-flow report; report
   categories link through to the filtered transactions list.
 - Budget tracking: set per-category monthly limits and track progress.
@@ -129,8 +130,12 @@ Effective category priority (highest wins):
 2. Rule match (highest-priority rule wins; rules auto-apply after sync)
 3. Plaid's `personal_finance_category`
 
-`INTERNAL TRANSFER` (written by the transfer detector) and `CREDIT PAYMENT`
-are treated as internal noise and excluded from spend/income summaries.
+`INTERNAL TRANSFER` (written by the transfer detector), `CREDIT PAYMENT`, and
+`INVESTMENT` are excluded from every spend/income aggregation — the dashboard
+totals, the month-over-month cash flow, and the reports charts/Sankey all share
+one exclusion list (`analytics.EXCLUDED_CATEGORIES`) so their numbers agree.
+Investment contributions fold into the reports "Saved" surplus rather than
+counting as spending.
 
 ## Architecture
 

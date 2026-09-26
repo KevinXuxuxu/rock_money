@@ -357,7 +357,8 @@ class TestIncomeByAccountCategory:
         assert "SUM(-t.amount)" in sql
 
     def test_excludes_internal_categories(self, mock_db):
-        """Internal transfers/credit payments must not appear as income sources."""
+        """Internal transfers, credit payments, and investment must not appear as
+        income sources."""
         mock_db.fetchall.return_value = []
 
         analytics.income_by_account_category("2026-06")
@@ -365,6 +366,7 @@ class TestIncomeByAccountCategory:
         sql = mock_db.execute.call_args[0][0]
         assert "INTERNAL TRANSFER" in sql
         assert "CREDIT PAYMENT" in sql
+        assert "INVESTMENT" in sql
         assert "NOT IN" in sql
 
     def test_excludes_superseded_pending(self, mock_db):
@@ -544,6 +546,7 @@ class TestSpendByCategoryAccount:
         sql = mock_db.execute.call_args[0][0]
         assert "INTERNAL TRANSFER" in sql
         assert "CREDIT PAYMENT" in sql
+        assert "INVESTMENT" in sql
         assert "pending_transaction_id" in sql
 
 
@@ -1474,6 +1477,7 @@ class TestInternalCategoryFiltering:
         sql = mock_db.execute.call_args[0][0]
         assert "INTERNAL TRANSFER" in sql
         assert "CREDIT PAYMENT" in sql
+        assert "INVESTMENT" in sql
         assert "NOT IN" in sql
 
     def test_monthly_summary_excludes_internal_transfer(self, mock_db):
@@ -1484,6 +1488,7 @@ class TestInternalCategoryFiltering:
         sql = mock_db.execute.call_args[0][0]
         assert "INTERNAL TRANSFER" in sql
         assert "CREDIT PAYMENT" in sql
+        assert "INVESTMENT" in sql
         assert "NOT IN" in sql
 
     def test_monthly_summary_joins_category_overrides(self, mock_db):
@@ -1503,6 +1508,7 @@ class TestInternalCategoryFiltering:
         sql = mock_db.execute.call_args[0][0]
         assert "INTERNAL TRANSFER" in sql
         assert "CREDIT PAYMENT" in sql
+        assert "INVESTMENT" in sql
         assert "NOT IN" in sql
 
     def test_internal_categories_constant_contains_expected_values(self):
@@ -1510,5 +1516,13 @@ class TestInternalCategoryFiltering:
         assert "CREDIT PAYMENT" in analytics.INTERNAL_CATEGORIES
 
     def test_investment_category_constant(self):
-        """INVESTMENT is special-cased: excluded from the spend chart and Sankey."""
+        """INVESTMENT is special-cased: excluded from every spend/income summary."""
         assert analytics.INVESTMENT_CATEGORY == "INVESTMENT"
+
+    def test_excluded_categories_constant_covers_all_three(self):
+        """Single source of truth shared by every aggregation query."""
+        assert analytics.EXCLUDED_CATEGORIES == (
+            "CREDIT PAYMENT",
+            "INTERNAL TRANSFER",
+            "INVESTMENT",
+        )

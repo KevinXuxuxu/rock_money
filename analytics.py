@@ -16,9 +16,18 @@ _log = logging.getLogger(__name__)
 INTERNAL_CATEGORIES: frozenset[str] = frozenset({"INTERNAL TRANSFER", "CREDIT PAYMENT"})
 
 # Plaid primary category for brokerage/investment contributions. Not consumption:
-# excluded from the reports spend chart and the Sankey diagram entirely — the
-# money rolls into the "Saved" surplus (income minus non-investment spending).
+# excluded from every spend/income aggregation — the money rolls into the reports
+# "Saved" surplus instead of counting as spending.
 INVESTMENT_CATEGORY = "INVESTMENT"
+
+# Every category kept out of spend/income/cash-flow aggregations. Shared by all
+# query functions below so the dashboard totals, monthly cash flow, reports
+# charts, and Sankey ignore exactly the same set. Sorted for deterministic SQL;
+# values are code constants (never user input), so literal rendering is safe.
+EXCLUDED_CATEGORIES: tuple[str, ...] = tuple(
+    sorted(INTERNAL_CATEGORIES | {INVESTMENT_CATEGORY})
+)
+_EXCLUDED_SQL = "(" + ", ".join(f"'{c}'" for c in EXCLUDED_CATEGORIES) + ")"
 
 # Pending transactions ARE counted in all stats — most of them post unchanged.
 # The one exception is a pending transaction that has already posted under a new
@@ -124,11 +133,11 @@ def spend_by_category(month: str) -> list[dict]:
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE """
                 + _NOT_SUPERSEDED
-                + """
+                + f"""
                   AND t.amount > 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
-                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                      NOT IN {_EXCLUDED_SQL}
                 GROUP BY COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_spend DESC
             """,
@@ -158,11 +167,11 @@ def income_by_category(month: str) -> list[dict]:
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE """
                 + _NOT_SUPERSEDED
-                + """
+                + f"""
                   AND t.amount < 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
-                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                      NOT IN {_EXCLUDED_SQL}
                 GROUP BY COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_income DESC
             """,
@@ -197,11 +206,11 @@ def income_by_account_category(month: str) -> list[dict]:
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE """
                 + _NOT_SUPERSEDED
-                + """
+                + f"""
                   AND t.amount < 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
-                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                      NOT IN {_EXCLUDED_SQL}
                 GROUP BY t.account_id, a.name, a.mask,
                          COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_income DESC
@@ -237,11 +246,11 @@ def spend_by_category_account(month: str) -> list[dict]:
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE """
                 + _NOT_SUPERSEDED
-                + """
+                + f"""
                   AND t.amount > 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
-                      NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                      NOT IN {_EXCLUDED_SQL}
                 GROUP BY t.account_id, a.name, a.mask, a.label,
                          COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_spend DESC
@@ -276,9 +285,9 @@ def monthly_summary(months: int = 12) -> list[dict]:
                     LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                     WHERE """
                 + _NOT_SUPERSEDED
-                + """
+                + f"""
                       AND COALESCE(co.category, t.personal_finance_category)
-                          NOT IN ('INTERNAL TRANSFER', 'CREDIT PAYMENT')
+                          NOT IN {_EXCLUDED_SQL}
                     GROUP BY date_trunc('month', t.date)
                     ORDER BY month DESC
                     LIMIT %s
