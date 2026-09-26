@@ -45,6 +45,21 @@ def fmt_amount_filter(v):
     return f"-{s}" if f < 0 else s
 
 
+def _safe_redirect_target(target: str | None) -> str | None:
+    """Return a same-site relative URL, or None if it could redirect off-site.
+
+    Inline editors post a `next` field so the server can bounce the user back to
+    the exact filtered list they were viewing. Only paths starting with a single
+    `/` are allowed (no scheme/host, no protocol-relative `//`, no `\\` which some
+    browsers normalise to `//`).
+    """
+    if not target or not target.startswith("/"):
+        return None
+    if target.startswith("//") or "\\" in target:
+        return None
+    return target
+
+
 @app.get("/")
 def dashboard():
     month = datetime.now().strftime("%Y-%m")
@@ -185,12 +200,19 @@ def transactions_page():
             {k: val for k, val in v["filters"].items() if val}
         )
 
+    # Bounce-back target for the inline category editor: the current list URL
+    # with every filter intact (e.g. /transactions?month=2026-05&q=...).
+    return_url = request.path
+    if request.query_string:
+        return_url += "?" + request.query_string.decode()
+
     return render_template(
         "transactions.html",
         txns=txns,
         accounts=accounts,
         categories=categories,
         views=views,
+        return_url=return_url,
         filters={
             "q": q or "",
             "account": account_id or "",
@@ -408,6 +430,11 @@ def set_category_web(txn_id):
         db.upsert_category_override(txn_id, category)
     else:
         db.delete_category_override(txn_id)
+    # The transactions list posts `next` so an edit reloads the same filtered
+    # view; the detail page omits it and returns to the transaction instead.
+    nxt = _safe_redirect_target(request.form.get("next"))
+    if nxt:
+        return redirect(nxt)
     return redirect(url_for("transaction_detail", txn_id=txn_id))
 
 

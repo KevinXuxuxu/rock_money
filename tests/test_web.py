@@ -431,6 +431,37 @@ class TestTransactionsPage:
         resp = client.get("/transactions")
         assert b"reimbursable" in resp.data
 
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_category_cell_is_inline_editor(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        """Category is edit-in-place: click swaps it for an input that posts back."""
+        mock_accts.return_value = []
+        mock_txns.return_value = [
+            make_txn(transaction_id="txn_abc", effective_category="My Custom")
+        ]
+        mock_cats.return_value = ["DINING", "GROCERIES"]
+        mock_views.return_value = []
+
+        resp = client.get("/transactions?month=2026-05&category=GROCERIES")
+        data = resp.data
+
+        # The value is shown as a clickable display until edited.
+        assert b'class="cat-display"' in data
+        # The (initially hidden) form posts and returns to the exact filtered URL.
+        assert b'class="cat-form" hidden' in data
+        assert b'action="/transactions/txn_abc/category"' in data
+        assert (
+            b'name="next" value="/transactions?month=2026-05&amp;category=GROCERIES"'
+            in data
+        )
+        # Existing categories are offered as datalist suggestions.
+        assert b'<datalist id="category-options">' in data
+        assert b'<option value="GROCERIES"></option>' in data
+
 
 class TestSearchPage:
     def test_redirects_to_transactions(self, client):
@@ -495,6 +526,52 @@ class TestTransactionDetailPage:
         resp = client.get("/transactions/txn_1")
         assert b"travel" in resp.data
         assert b"business" in resp.data
+
+
+class TestSetTransactionCategory:
+    @patch("db.upsert_category_override")
+    def test_redirects_back_to_filtered_list(self, mock_upsert, client):
+        resp = client.post(
+            "/transactions/txn_1/category",
+            data={
+                "category": "Shopping",
+                "next": "/transactions?month=2026-05&q=coffee",
+            },
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/transactions?month=2026-05&q=coffee"
+        mock_upsert.assert_called_once_with("txn_1", "Shopping")
+
+    @patch("db.upsert_category_override")
+    def test_ignores_offsite_next(self, mock_upsert, client):
+        """A tampered `next` can't bounce the user to another site."""
+        resp = client.post(
+            "/transactions/txn_1/category",
+            data={"category": "Shopping", "next": "https://evil.example/phish"},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/transactions/txn_1")
+        mock_upsert.assert_called_once()
+
+    @patch("db.upsert_category_override")
+    def test_defaults_to_detail_page(self, mock_upsert, client):
+        """The detail-page form (no `next`) still returns to the transaction."""
+        resp = client.post(
+            "/transactions/txn_1/category", data={"category": "Shopping"}
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/transactions/txn_1")
+        mock_upsert.assert_called_once()
+
+    @patch("db.delete_category_override")
+    def test_empty_category_clears_override(self, mock_delete, client):
+        resp = client.post(
+            "/transactions/txn_1/category",
+            data={"category": "", "next": "/transactions"},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"] == "/transactions"
+        mock_delete.assert_called_once_with("txn_1")
 
 
 class TestRulesPage:
