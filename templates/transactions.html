@@ -77,6 +77,13 @@
 </form>
 {% endif %}
 
+<!-- Category suggestions for the inline editor -->
+<datalist id="category-options">
+  {% for cat in categories %}
+  <option value="{{ cat }}"></option>
+  {% endfor %}
+</datalist>
+
 <!-- Results -->
 <section>
   <div class="card">
@@ -114,12 +121,19 @@
               {{ t.account_name or '—' }}
               {% if t.account_mask %}<span class="mono">···{{ t.account_mask }}</span>{% endif %}
             </td>
-            <td>
-              <a href="/transactions/{{ t.transaction_id }}"
-                 style="color:inherit;display:inline-flex;align-items:center;gap:4px">
+            <td class="cat-cell">
+              <button type="button" class="cat-display" title="Click to edit category">
                 {{ t.effective_category or '—' }}
-                <span style="color:var(--muted);font-size:11px">✎</span>
-              </a>
+                <span class="cat-pencil" aria-hidden="true">✎</span>
+              </button>
+              <form method="post" action="/transactions/{{ t.transaction_id }}/category"
+                    class="cat-form" hidden>
+                <input type="hidden" name="next" value="{{ return_url }}">
+                <input type="text" name="category" list="category-options"
+                       class="cat-input"
+                       value="{{ t.effective_category or '' }}"
+                       autocomplete="off" spellcheck="false" aria-label="Category">
+              </form>
             </td>
             <td class="muted" style="font-size:13px">{{ t.note or '' }}</td>
           </tr>
@@ -132,4 +146,43 @@
     {% endif %}
   </div>
 </section>
+
+<script>
+  // Inline category editor: clicking a category swaps it for an input. Enter
+  // submits the form (native implicit submission); the server redirects back to
+  // the same filtered list. Escape or clicking anywhere else cancels the edit.
+  document.querySelectorAll('td.cat-cell').forEach(function (cell) {
+    var display = cell.querySelector('.cat-display');
+    var form = cell.querySelector('.cat-form');
+    var input = form.querySelector('input[name="category"]');
+    var submitting = false;
+
+    function cancelEditor() {
+      form.hidden = true;
+      display.hidden = false;
+    }
+
+    display.addEventListener('click', function () {
+      display.hidden = true;
+      form.hidden = false;
+      input.focus();
+      input.select();
+    });
+
+    form.addEventListener('submit', function () { submitting = true; });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelEditor();
+        display.focus();
+      }
+    });
+
+    input.addEventListener('blur', function () {
+      // Clicking or tabbing away gives up the edit without saving.
+      if (!submitting && !form.hidden) { cancelEditor(); }
+    });
+  });
+</script>
 {% endblock %}
