@@ -258,6 +258,17 @@
       if (nav.classList.contains('open') && !nav.contains(e.target))
         nav.classList.remove('open');
     });
+
+    // The server doesn't know the visitor's timezone, so absolute timestamps
+    // are emitted as <time datetime="…UTC…"> and localised here.
+    document.querySelectorAll('time.localtime').forEach(function (el) {
+      var d = new Date(el.getAttribute('datetime'));
+      if (isNaN(d.getTime())) { return; }
+      el.textContent = d.toLocaleString(undefined, {
+        dateStyle: 'medium', timeStyle: 'short'
+      });
+      el.title = d.toLocaleString();
+    });
   </script>
 </body>
 </html>

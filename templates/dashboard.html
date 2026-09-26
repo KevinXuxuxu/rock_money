@@ -4,7 +4,8 @@
 {% block content %}
 <h2>Dashboard <span style="font-weight:400;color:var(--muted);font-size:16px">{{ month }}</span></h2>
 <p class="muted" style="margin-top:-10px;margin-bottom:20px;font-size:13px">
-  Figures include pending transactions (shown in grey).
+  Last synced: {{ last_synced_at|timeago }}
+  · Figures include pending transactions (shown in grey).
 </p>
 
 <!-- Summary cards -->

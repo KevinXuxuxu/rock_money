@@ -3,6 +3,9 @@
 
 {% block content %}
 <h2>Transactions</h2>
+<p class="muted" style="margin-top:-12px;margin-bottom:20px;font-size:13px">
+  Last synced: {{ last_synced_at|timeago }}
+</p>
 
 <!-- Saved views -->
 {% if views %}

@@ -1,5 +1,6 @@
 """Tests for web_server.py Flask routes — all analytics calls are mocked."""
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -13,6 +14,16 @@ def client():
     web_server.app.config["TESTING"] = True
     with web_server.app.test_client() as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def _stub_last_synced(monkeypatch):
+    """
+    Every page render reads the global last-sync time via a context processor.
+    Stub it to None so page tests don't need to mock it; patch
+    ``db.get_last_synced_at`` in a test to assert the rendered value.
+    """
+    monkeypatch.setattr("db.get_last_synced_at", lambda: None)
 
 
 def _spend_rows():
@@ -51,7 +62,68 @@ def _summary_rows():
     ]
 
 
+class TestTimeagoFilter:
+    def test_none_is_never(self):
+        assert web_server.timeago_filter(None) == "never"
+
+    def test_just_now(self):
+        assert web_server.timeago_filter(datetime.now(timezone.utc)) == "just now"
+
+    def test_minutes(self):
+        when = datetime.now(timezone.utc) - timedelta(minutes=5, seconds=5)
+        assert web_server.timeago_filter(when) == "5 minutes ago"
+
+    def test_singular_minute(self):
+        when = datetime.now(timezone.utc) - timedelta(minutes=1, seconds=5)
+        assert web_server.timeago_filter(when) == "1 minute ago"
+
+    def test_hours(self):
+        when = datetime.now(timezone.utc) - timedelta(hours=3, seconds=5)
+        assert web_server.timeago_filter(when) == "3 hours ago"
+
+    def test_older_than_a_day_uses_localizable_timestamp(self):
+        when = datetime.now(timezone.utc) - timedelta(days=2, seconds=5)
+        result = str(web_server.timeago_filter(when))
+        assert 'class="localtime"' in result
+        assert "UTC" in result  # no-JS fallback
+        assert "ago" not in result
+
+    def test_old_uses_localizable_timestamp(self):
+        when = datetime(2026, 6, 5, 12, 0, tzinfo=timezone.utc)
+        result = str(web_server.timeago_filter(when))
+        assert 'datetime="2026-06-05T12:00:00+00:00"' in result
+        assert "Jun 5, 2026 12:00 UTC" in result  # until JS localises it
+
+
 class TestDashboard:
+    @patch("db.get_last_synced_at")
+    @patch("analytics.income_by_category")
+    @patch("analytics.monthly_summary")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.get_transactions")
+    @patch("analytics.get_accounts")
+    def test_shows_last_synced(
+        self,
+        mock_accts,
+        mock_txns,
+        mock_spend,
+        mock_summary,
+        mock_income,
+        mock_last_synced,
+        client,
+    ):
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_spend.return_value = []
+        mock_summary.return_value = []
+        mock_income.return_value = []
+        mock_last_synced.return_value = datetime.now(timezone.utc) - timedelta(
+            minutes=5, seconds=5
+        )
+
+        resp = client.get("/")
+        assert b"Last synced: 5 minutes ago" in resp.data
+
     @patch("analytics.income_by_category")
     @patch("analytics.monthly_summary")
     @patch("analytics.spend_by_category")
@@ -286,6 +358,7 @@ class TestTransactionsPage:
         mock_views.return_value = []
         resp = client.get("/transactions")
         assert resp.status_code == 200
+        assert b"Last synced" in resp.data
 
     @patch("db.list_views")
     @patch("analytics.get_categories")
@@ -854,6 +927,7 @@ class TestReportsPage:
         mock_income_acct.return_value = []
         resp = client.get("/reports")
         assert resp.status_code == 200
+        assert b"Last synced" in resp.data
 
     @patch("analytics.spend_by_category_account")
     @patch("analytics.income_by_account_category")
