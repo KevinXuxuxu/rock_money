@@ -94,7 +94,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for r in summary %}
+            {% for r in summary|reverse %}
             <tr>
               <td>{{ r.month|string|truncate(7, True, '') }}</td>
               <td class="num credit">{{ r.income|money }}</td>
