@@ -2,7 +2,11 @@
 {% block title %}Reports{% endblock %}
 
 {% block content %}
-<h2>Reports</h2>
+<div class="page-head">
+  <h2>Reports</h2>
+  <a class="page-action" href="/transactions?month={{ month }}"
+     title="View every transaction in {{ month_label }}">View all {{ month_label }} transactions →</a>
+</div>
 
 <!-- Month navigation (drives spend, income & budgets) -->
 <section>
