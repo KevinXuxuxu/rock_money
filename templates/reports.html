@@ -7,6 +7,9 @@
   <a class="page-action" href="/transactions?month={{ month }}"
      title="View every transaction in {{ month_label }}">View all {{ month_label }} transactions →</a>
 </div>
+<p class="muted" style="margin-top:-12px;margin-bottom:20px;font-size:13px">
+  Last synced: {{ last_synced_at|timeago }}
+</p>
 
 <!-- Month navigation (drives spend, income & budgets) -->
 <section>

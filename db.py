@@ -111,6 +111,16 @@ def set_cursor(item_id: str, cursor: str) -> None:
             )
 
 
+def get_last_synced_at():
+    """Return the most recent successful Plaid sync time across all items,
+    or None when nothing has been synced yet."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(last_synced_at) FROM sync_cursors")
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
 # ── Accounts ───────────────────────────────────────────────────────────────────
 
 

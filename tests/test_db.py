@@ -1,5 +1,6 @@
 """Tests for db.py — category overrides, rules, notes, tags, views."""
 
+from datetime import datetime
 from unittest.mock import patch
 
 import db
@@ -46,6 +47,22 @@ class TestItems:
         params = mock_db.execute.call_args[0][1]
         assert "DELETE FROM items" in sql
         assert params == ("item_1",)
+
+
+class TestLastSynced:
+    """get_last_synced_at"""
+
+    def test_returns_max_timestamp(self, mock_db):
+        when = datetime(2026, 6, 15, 12, 0)
+        mock_db.fetchone.return_value = (when,)
+        assert db.get_last_synced_at() == when
+        sql = mock_db.execute.call_args[0][0]
+        assert "MAX(last_synced_at)" in sql
+        assert "FROM sync_cursors" in sql
+
+    def test_returns_none_when_no_rows(self, mock_db):
+        mock_db.fetchone.return_value = None
+        assert db.get_last_synced_at() is None
 
 
 class TestCategoryOverrides:

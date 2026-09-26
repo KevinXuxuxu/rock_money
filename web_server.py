@@ -2,10 +2,11 @@
 
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from markupsafe import Markup
 
 import analytics
 import db
@@ -43,6 +44,49 @@ def fmt_amount_filter(v):
     f = float(v)
     s = f"${abs(f):,.2f}"
     return f"-{s}" if f < 0 else s
+
+
+def _humanize_since(when) -> str:
+    """Render a past timestamp as a short relative phrase for the last day
+    ('5 minutes ago', '3 hours ago'), then fall back to an absolute date + time
+    so the result is always more precise than a bare date."""
+    if when is None:
+        return "never"
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    seconds = max((datetime.now(timezone.utc) - when).total_seconds(), 0)
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        value, unit = int(seconds // 60), "minute"
+    elif seconds < 86400:
+        value, unit = int(seconds // 3600), "hour"
+    else:
+        utc = when.astimezone(timezone.utc)
+        return f"{utc:%b} {utc.day}, {utc:%Y %H:%M} UTC"
+    return f"{value} {unit}{'s' if value != 1 else ''} ago"
+
+
+@app.template_filter("timeago")
+def timeago_filter(v):
+    """Recent timestamps render as a relative phrase; older ones render inside a
+    <time> element whose UTC datetime a small script localises in the browser.
+    """
+    text = _humanize_since(v)
+    if v is None:
+        return text
+    if v.tzinfo is None:
+        v = v.replace(tzinfo=timezone.utc)
+    if (datetime.now(timezone.utc) - v).total_seconds() < 86400:
+        return text
+    iso = v.astimezone(timezone.utc).isoformat()
+    return Markup(f'<time class="localtime" datetime="{iso}">{text}</time>')
+
+
+@app.context_processor
+def inject_last_synced_at() -> dict:
+    """Expose the most recent Plaid sync time to every page template."""
+    return {"last_synced_at": db.get_last_synced_at()}
 
 
 def _safe_redirect_target(target: str | None) -> str | None:
