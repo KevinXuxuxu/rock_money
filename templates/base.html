@@ -43,6 +43,11 @@
     h2 { font-size: 22px; font-weight: 600; margin: 0 0 20px; }
     h3 { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase;
          letter-spacing: .07em; margin: 0 0 14px; }
+    /* Page title with a secondary action aligned to the right (e.g. "View all …"). */
+    .page-head { display: flex; align-items: baseline; justify-content: space-between;
+                 gap: 12px; flex-wrap: wrap; }
+    .page-action { color: var(--blue); font-size: 13px; white-space: nowrap; }
+    .page-action:hover { text-decoration: underline; }
     section { margin-bottom: 32px; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .row > *, .cards > * { min-width: 0; }

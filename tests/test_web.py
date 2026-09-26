@@ -869,6 +869,8 @@ class TestReportsPage:
         assert (
             b'href="/transactions?month=2026-05&amp;category=INCOME_WAGES"' in resp.data
         )
+        # The page header links to every transaction in the selected month.
+        assert b'href="/transactions?month=2026-05"' in resp.data
 
     @patch("analytics.spend_by_category_account")
     @patch("analytics.income_by_account_category")
