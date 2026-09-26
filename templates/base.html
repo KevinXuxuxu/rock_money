@@ -11,7 +11,14 @@
       --red: #c0392b; --amber: #b45309;
     }
     *, *::before, *::after { box-sizing: border-box; }
-    html { overflow-x: clip; }
+    /* Reserve the vertical scrollbar gutter so centered content never shifts
+       sideways when the scrollbar appears/disappears between page loads. */
+    html { overflow-x: clip; scrollbar-gutter: stable; }
+    /* Fallback for browsers without scrollbar-gutter (e.g. Safari < 18.2):
+       keep the scrollbar permanently visible instead. */
+    @supports not (scrollbar-gutter: stable) {
+      html { overflow-y: scroll; }
+    }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
            background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
     a { color: inherit; text-decoration: none; }
