@@ -16,7 +16,8 @@ local, no monthly fee and no third party holding onto your data.
 - Idempotent upserts — running `sync` repeatedly is safe.
 - Pending transactions are counted in stats; a pending row already superseded
   by its posted twin is excluded so nothing is double-counted.
-- Cascading deletes: removing an item cleans up its accounts and transactions.
+- Cascading deletes: removing an item (via `remove-item` or the Accounts
+  page) cleans up its accounts and transactions.
 
 **Internal transfer detection**
 - Runs automatically after every sync (or standalone via `detect-transfers`).
@@ -30,22 +31,34 @@ local, no monthly fee and no third party holding onto your data.
   overrides, and `--dry-run` previews pairs without writing.
 
 **Web dashboard** (`uv run python main.py web`)
-- Account summary with transaction counts and debit/credit totals.
-- Transactions page with full-text search (merchant, name, note), month/
-  category/account filters, saved search views, and a live total for the
-  current filter.
-- Transaction detail page: override category, add a note, add/remove tags.
-- Money-flow Sankey diagram on the reports page: income by account (with last-4
-  mask) and category → total → spending by category → which accounts the
-  spending hit → grouped by account label. Unspent income shows as a green
-  "Saved" flow, overspent months add a grey "Withdraw" inflow; investment
-  contributions, internal transfers, and credit-card payments are excluded
-  (Plotly, SRI-pinned).
-- Spend-by-category bar chart and month-over-month cash-flow report; report
-  categories link through to the filtered transactions list.
-- Budget tracking: set per-category monthly limits and track progress.
-- Rules page with search (pattern or category) and pagination — browsable
-  even with hundreds of rules.
+- **Dashboard** (`/`): current-month spent/income/net tiles, spend and
+  income by category, a 6-month income-vs-spend summary, and the most recent
+  transactions. Figures include pending transactions (shown in grey).
+- **Accounts** (`/accounts`): per-account transaction counts and
+  debit/credit totals, editable account labels, "Sync now" and "Link new
+  account" buttons, and removing a linked institution (with confirm).
+- **Transactions** (`/transactions`): full-text search (merchant, name,
+  note), month/category/account filters, saved search views, a live total
+  for the current filter, and inline category override right from the list —
+  your current filters are preserved when you edit.
+- **Transaction detail** (`/transactions/<id>`): override category, add a
+  note, add/remove tags.
+- **Reports** (`/reports`): month navigation with a "view all transactions
+  for this month" link; money-flow Sankey diagram: income by account (with
+  last-4 mask) and category → total → spending by category → which accounts
+  the spending hit → grouped by account label. Unspent income shows as a
+  green "Saved" flow, overspent months add a grey "Withdraw" inflow;
+  investment contributions, internal transfers, and credit-card payments are
+  excluded (Plotly, SRI-pinned). Spend- and income-by-category bar charts,
+  a 6-month cash-flow table, and per-category budget progress (budgets are
+  set via `budget-set`) — report categories link through to the filtered
+  transactions list.
+- **Rules** (`/rules`): create, delete, and apply rules, with search
+  (pattern or category) and pagination — browsable even with hundreds of
+  rules.
+- Every page shows the last Plaid sync time — a relative phrase ("3 hours
+  ago") within the last day, otherwise an absolute UTC time localised in the
+  browser.
 
 **Category rules engine**
 - Define rules that match transactions by merchant name, display name, or
@@ -101,6 +114,38 @@ uv run python main.py detect-transfers --dry-run  # preview only
 uv run python main.py detect-transfers            # mark pairs as INTERNAL TRANSFER
 ```
 
+### CLI reference
+
+Everything runs through `uv run python main.py <command>` (add `--help` for
+per-command flags):
+
+| Command | What it does |
+| --- | --- |
+| `init` | Create the database schema (safe to re-run) |
+| `link` | Connect a bank via Plaid Link (`--port`, default 8765) |
+| `sync` | Sync transactions for all linked institutions (`-q` for quiet) |
+| `list-items` | Linked institutions and their last sync time |
+| `remove-item <item_id>` | Revoke an institution and delete all its data (typed confirm) |
+| `accounts` | Accounts with transaction counts |
+| `list-txns` | Recent transactions; `--account` / `--category` / `--month` / `--pending` / `--search` filters |
+| `search [query]` | Full-text search; `--month`, `--category`, `--limit` |
+| `report-spend` | Spending by category for a month (`--month`) |
+| `report-monthly` | Income vs spend per month (`--months`, default 12) |
+| `categorize <txn_id> <category>` | Set a manual category override |
+| `uncategorize <txn_id>` | Remove a manual category override |
+| `rule-add --match <text> --category <cat> [--field] [--priority]` | Create a category rule (field: `merchant_name`, `name`, `personal_finance_category`) |
+| `rule-list` / `rule-remove <id>` / `rule-apply [--dry-run]` | Manage rules; apply them to uncategorized transactions |
+| `detect-transfers [--dry-run]` | Mark TRANSFER_IN/OUT pairs as INTERNAL TRANSFER |
+| `budget-set <category> <amount>` | Set a monthly budget for a category |
+| `budget-list` / `budget-delete <category>` | Manage budgets |
+| `budget-status [--month]` | Budget vs actual spend for a month |
+| `budget-alert [--month] [--threshold]` | Flag categories at/over a usage threshold (default 80%) |
+| `note <txn_id> <text>` | Set a note (empty text clears it) |
+| `tag-add <txn_id> <tag>` / `tag-remove <txn_id> <tag>` | Add/remove tags |
+| `view-save <name> [--search] [--month] [--category]` | Save a named search view |
+| `view-list` / `view-delete <name>` | Manage saved views |
+| `web` | Web dashboard (`--port`, default 8123; `--debug`) |
+
 Plaid sandbox test credentials: username `user_good`, password `pass_good`,
 phone OTP `123456`.
 
@@ -126,7 +171,8 @@ negative = credit (money in)**.
 
 Effective category priority (highest wins):
 
-1. Manual override set by the user on the transaction detail page
+1. Manual override set by the user (detail page or inline from the
+   transactions list)
 2. Rule match (highest-priority rule wins; rules auto-apply after sync)
 3. Plaid's `personal_finance_category`
 
