@@ -52,7 +52,7 @@
   <div class="filter-actions">
     <label>
       Limit
-      <input type="number" name="limit" value="{{ filters.limit }}" min="10" max="500" style="width:80px">
+      <input type="number" name="limit" value="{{ filters.limit }}" min="10" style="width:80px">
     </label>
     <label class="check-label">
       <input type="checkbox" name="pending" value="1" {% if filters.pending %}checked{% endif %}>
@@ -92,9 +92,15 @@
   <div class="card">
     {% if txns %}
     {% set net = txns|sum(attribute='amount') %}
-    <div style="color:var(--muted);font-size:13px;margin-bottom:14px">
-      Showing {{ txns|length }} transaction{{ 's' if txns|length != 1 }}
-      · net <strong class="{{ net|sign_class }}">{{ net|fmt_amount }}</strong>
+    <div style="color:var(--muted);font-size:13px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>
+        Showing {{ txns|length }} transaction{{ 's' if txns|length != 1 }}
+        · net <strong class="{{ net|sign_class }}">{{ net|fmt_amount }}</strong>
+      </span>
+      <a href="{{ export_url }}" class="page-action"
+         title="Download the transactions on this page (current filters) as CSV, in Rocket Money export format">
+        ⬇ Export CSV
+      </a>
     </div>
     <div class="table-wrap">
       <table>

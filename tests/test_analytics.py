@@ -1526,3 +1526,132 @@ class TestInternalCategoryFiltering:
             "INTERNAL TRANSFER",
             "INVESTMENT",
         )
+
+
+class TestGetExportRows:
+    """get_export_rows() — data source for the transactions-page CSV export."""
+
+    @staticmethod
+    def _export_row(txn_id: str, date_val: str) -> dict:
+        return {
+            "transaction_id": txn_id,
+            "date": date_val,
+            "amount": 10.0,
+            "name": "Sample Transaction",
+            "merchant_name": "Sample Merchant",
+            "effective_category": "GROCERIES",
+            "account_name": "Checking",
+            "account_mask": "1234",
+            "account_type": "DEPOSITORY",
+            "account_subtype": "CHECKING",
+            "institution_name": "Test Bank",
+            "note": None,
+        }
+
+    def test_fetches_like_page_and_returns_oldest_first(self, mock_db):
+        """The SQL must mirror the page (newest-first + LIMIT) so the exported
+        set is the same set the page displays; rows are returned reversed
+        (oldest first) for the CSV."""
+        mock_db.fetchall.side_effect = [
+            # What the DB returns under the page's ordering (newest first).
+            [
+                self._export_row("t_new", "2026-01-02"),
+                self._export_row("t_old", "2026-01-01"),
+            ],
+            [],
+        ]
+
+        result = analytics.get_export_rows()
+
+        sql = mock_db.execute.call_args_list[0][0][0]
+        assert "ORDER BY t.date DESC, t.name" in sql
+        assert [r["transaction_id"] for r in result] == ["t_old", "t_new"]
+
+    def test_selects_export_fields(self, mock_db):
+        mock_db.fetchall.side_effect = [[], []]
+
+        analytics.get_export_rows()
+
+        sql = mock_db.execute.call_args_list[0][0][0]
+        for fragment in (
+            "a.type AS account_type",
+            "a.subtype AS account_subtype",
+            "i.institution_name",
+            "tn.note",
+            "JOIN items i ON i.item_id = a.item_id",
+            "LEFT JOIN transaction_notes tn",
+            "LIMIT %s",
+        ):
+            assert fragment in sql
+
+    def test_uses_same_filters_as_list(self, mock_db):
+        mock_db.fetchall.side_effect = [[], []]
+
+        analytics.get_export_rows(
+            account_id="acct_1",
+            category="GROCERIES",
+            month="2026-01",
+            pending_only=True,
+            q="qfc",
+            limit=42,
+        )
+
+        sql = mock_db.execute.call_args_list[0][0][0]
+        params = mock_db.execute.call_args_list[0][0][1]
+        assert "t.account_id = %s" in sql
+        assert "t.pending = TRUE" in sql
+        assert "t.name ILIKE %s" in sql
+        assert params[:5] == ["acct_1", "GROCERIES", "2026-01-01", "%qfc%", "%qfc%"]
+        assert params[-1] == 42  # limit
+
+    def test_default_limit_is_100(self, mock_db):
+        mock_db.fetchall.side_effect = [[], []]
+
+        analytics.get_export_rows()
+
+        params = mock_db.execute.call_args_list[0][0][1]
+        assert params[-1] == 100
+
+    def test_excludes_superseded_pending(self, mock_db):
+        mock_db.fetchall.side_effect = [[], []]
+
+        analytics.get_export_rows()
+
+        sql = mock_db.execute.call_args_list[0][0][0]
+        assert "pending_transaction_id = t.transaction_id" in sql
+
+    def test_tags_attached_to_rows(self, mock_db):
+        rows = [
+            self._export_row("t1", "2026-01-01"),
+            self._export_row("t2", "2026-01-02"),
+        ]
+        mock_db.fetchall.side_effect = [
+            rows,
+            [("t1", "bulk"), ("t1", "groceries"), ("t2", "vacation")],
+        ]
+
+        result = analytics.get_export_rows()
+
+        # Rows come back reversed (oldest first) relative to the page ordering.
+        assert [r["transaction_id"] for r in result] == ["t2", "t1"]
+        assert result[0]["tags"] == ["vacation"]
+        assert result[1]["tags"] == ["bulk", "groceries"]
+        # The tag query receives the row ids (order doesn't matter — ANY()).
+        tag_params = mock_db.execute.call_args_list[1][0][1]
+        assert sorted(tag_params[0]) == ["t1", "t2"]
+
+    def test_row_without_tags_gets_empty_list(self, mock_db):
+        rows = [self._export_row("t1", "2026-01-01")]
+        mock_db.fetchall.side_effect = [rows, []]
+
+        result = analytics.get_export_rows()
+
+        assert result[0]["tags"] == []
+
+    def test_no_rows_skips_tag_query(self, mock_db):
+        mock_db.fetchall.side_effect = [[]]
+
+        result = analytics.get_export_rows()
+
+        assert result == []
+        assert mock_db.execute.call_count == 1
