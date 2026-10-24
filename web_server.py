@@ -5,11 +5,21 @@ import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    Response,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from markupsafe import Markup
 
 import analytics
 import db
+import export
 import sync as sync_mod
 from plaid_client import PlaidClient
 
@@ -226,7 +236,10 @@ def transactions_page():
     category = request.args.get("category") or None
     month = request.args.get("month") or None
     pending_only = request.args.get("pending") == "1"
-    limit = min(int(request.args.get("limit", 100)), 500)
+    try:
+        limit = max(1, int(request.args.get("limit", 100)))
+    except ValueError:
+        limit = 100
 
     txns = analytics.get_transactions(
         q=q,
@@ -250,6 +263,21 @@ def transactions_page():
     if request.query_string:
         return_url += "?" + request.query_string.decode()
 
+    # CSV export of exactly this page: same filters, same limit. Only
+    # non-empty params are sent so the link stays readable.
+    export_params: dict = {"limit": limit}
+    if q:
+        export_params["q"] = q
+    if account_id:
+        export_params["account"] = account_id
+    if category:
+        export_params["category"] = category
+    if month:
+        export_params["month"] = month
+    if pending_only:
+        export_params["pending"] = "1"
+    export_url = "/transactions/export?" + urlencode(export_params)
+
     return render_template(
         "transactions.html",
         txns=txns,
@@ -257,6 +285,7 @@ def transactions_page():
         categories=categories,
         views=views,
         return_url=return_url,
+        export_url=export_url,
         filters={
             "q": q or "",
             "account": account_id or "",
@@ -265,6 +294,40 @@ def transactions_page():
             "pending": "1" if pending_only else "",
             "limit": limit,
         },
+    )
+
+
+@app.get("/transactions/export")
+def transactions_export():
+    """
+    Download the current filtered page as CSV in Rocket Money's export format
+    (same filters and limit as the /transactions page that linked here).
+    """
+    q = request.args.get("q", "").strip() or None
+    account_id = request.args.get("account") or None
+    category = request.args.get("category") or None
+    month = request.args.get("month") or None
+    pending_only = request.args.get("pending") == "1"
+    try:
+        limit = max(1, int(request.args.get("limit", 100)))
+    except ValueError:
+        limit = 100
+
+    rows = analytics.get_export_rows(
+        q=q,
+        limit=limit,
+        account_id=account_id,
+        category=category,
+        month=month,
+        pending_only=pending_only,
+    )
+    csv_text = export.render_transactions_csv(rows)
+    suffix = month if month else datetime.now().strftime("%Y-%m-%d")
+    filename = f"transactions_{suffix}.csv"
+    return Response(
+        csv_text,
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -41,27 +41,18 @@ _NOT_SUPERSEDED = """NOT (t.pending AND EXISTS (
     ))"""
 
 
-def get_transactions(
+def _transaction_conditions(
     *,
-    limit: int = 50,
     account_id: str | None = None,
     category: str | None = None,
     month: str | None = None,
     pending_only: bool = False,
     q: str | None = None,
-) -> list[dict]:
+) -> tuple[str, list]:
     """
-    Return recent transactions with account info, newest first.
-
-    Pending transactions are always included (except ones already superseded by a
-    posted row). Use pending_only to narrow to just the pending ones.
-
-    Args:
-        limit: max rows to return
-        account_id: filter to a single account
-        category: filter by Plaid personal_finance_category
-        month: YYYY-MM — filter to a specific month
-        pending_only: show only pending transactions
+    Build the shared WHERE clause + parameters for transaction list queries
+    (get_transactions and get_export_rows must stay in sync). Assumes the
+    transactions alias is `t`, plus the `co`/`tn` aliases when used.
     """
     conditions = [_NOT_SUPERSEDED]
     params: list = []
@@ -84,7 +75,38 @@ def get_transactions(
         like = f"%{q}%"
         params.extend([like, like, like])
 
-    where = " AND ".join(conditions)
+    return " AND ".join(conditions), params
+
+
+def get_transactions(
+    *,
+    limit: int = 50,
+    account_id: str | None = None,
+    category: str | None = None,
+    month: str | None = None,
+    pending_only: bool = False,
+    q: str | None = None,
+) -> list[dict]:
+    """
+    Return recent transactions with account info, newest first.
+
+    Pending transactions are always included (except ones already superseded by a
+    posted row). Use pending_only to narrow to just the pending ones.
+
+    Args:
+        limit: max rows to return
+        account_id: filter to a single account
+        category: filter by Plaid personal_finance_category
+        month: YYYY-MM — filter to a specific month
+        pending_only: show only pending transactions
+    """
+    where, params = _transaction_conditions(
+        account_id=account_id,
+        category=category,
+        month=month,
+        pending_only=pending_only,
+        q=q,
+    )
 
     query = f"""
         SELECT t.transaction_id, t.account_id, t.amount, t.iso_currency_code,
@@ -111,6 +133,85 @@ def get_transactions(
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
+
+
+def get_export_rows(
+    *,
+    limit: int = 100,
+    account_id: str | None = None,
+    category: str | None = None,
+    month: str | None = None,
+    pending_only: bool = False,
+    q: str | None = None,
+) -> list[dict]:
+    """
+    Return exactly the transactions the transactions page would display for
+    the given filters — same filters, ordering, and limit as get_transactions
+    (newest first, capped at `limit`) — but reversed to oldest first, with all
+    fields a CSV export needs: account type/subtype, institution name, note,
+    and tags.
+
+    Mirroring the page's ordering in the SQL is what keeps the exported set
+    identical to the displayed set (an ASC ordering with the same LIMIT would
+    return the *oldest* rows instead). The final reverse keeps the CSV
+    chronological, like Rocket Money's export. Tags are fetched in a second
+    query so each row gets a 'tags' list (possibly empty).
+    """
+    where, params = _transaction_conditions(
+        account_id=account_id,
+        category=category,
+        month=month,
+        pending_only=pending_only,
+        q=q,
+    )
+    query = f"""
+        SELECT t.transaction_id, t.date, t.amount, t.name, t.merchant_name,
+               COALESCE(co.category, t.personal_finance_category) AS effective_category,
+               a.name AS account_name, a.mask AS account_mask,
+               a.type AS account_type, a.subtype AS account_subtype,
+               i.institution_name,
+               tn.note
+        FROM transactions t
+        JOIN accounts a ON a.account_id = t.account_id
+        JOIN items i ON i.item_id = a.item_id
+        LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+        LEFT JOIN transaction_notes tn ON tn.transaction_id = t.transaction_id
+        WHERE {where}
+        ORDER BY t.date DESC, t.name
+        LIMIT %s
+    """
+    params.append(limit)
+
+    with db.get_conn() as conn:
+        import psycopg2.extras
+
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(query, params)
+            rows = [dict(row) for row in cur.fetchall()]
+
+    # The page displays these rows newest-first; reverse them so the export
+    # is chronological (oldest first) like Rocket Money's own CSV.
+    rows.reverse()
+
+    tags_by_txn: dict[str, list[str]] = {}
+    if rows:
+        ids = [r["transaction_id"] for r in rows]
+        with db.get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT transaction_id, tag
+                    FROM transaction_tags
+                    WHERE transaction_id = ANY(%s)
+                    ORDER BY tag
+                    """,
+                    (ids,),
+                )
+                for txn_id, tag in cur.fetchall():
+                    tags_by_txn.setdefault(txn_id, []).append(tag)
+    for r in rows:
+        r["tags"] = tags_by_txn.get(r["transaction_id"], [])
+    return rows
 
 
 def spend_by_category(month: str) -> list[dict]:

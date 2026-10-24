@@ -414,6 +414,58 @@ class TestTransactionsPage:
     @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
+    def test_limit_has_no_upper_cap(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        resp = client.get("/transactions?limit=5000")
+
+        assert resp.status_code == 200
+        assert mock_txns.call_args.kwargs["limit"] == 5000
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_bad_limit_falls_back_to_default(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        """A non-numeric limit must not crash the page (used to 500)."""
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        resp = client.get("/transactions?limit=abc")
+
+        assert resp.status_code == 200
+        assert mock_txns.call_args.kwargs["limit"] == 100
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_negative_limit_clamped_to_one(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        """LIMIT must stay positive (Postgres rejects negative LIMIT)."""
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        client.get("/transactions?limit=-5")
+
+        assert mock_txns.call_args.kwargs["limit"] == 1
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
     def test_empty_state(self, mock_txns, mock_accts, mock_cats, mock_views, client):
         mock_accts.return_value = []
         mock_txns.return_value = []
@@ -534,6 +586,39 @@ class TestTransactionsPage:
         # Existing categories are offered as datalist suggestions.
         assert b'<datalist id="category-options">' in data
         assert b'<option value="GROCERIES"></option>' in data
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_export_link_preserves_filters(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        """The Export CSV link downloads exactly the current filtered page."""
+        import html
+        import re
+
+        from urllib.parse import parse_qs, urlparse
+
+        mock_accts.return_value = []
+        mock_txns.return_value = [make_txn()]
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        resp = client.get("/transactions?q=amazon&month=2026-01&pending=1&limit=250")
+
+        links = re.findall(r'href="([^"]*)"', resp.get_data(as_text=True))
+        export_links = [
+            link for link in links if link.startswith("/transactions/export?")
+        ]
+        assert len(export_links) == 1, f"expected one export link, got {export_links}"
+        qs = parse_qs(urlparse(html.unescape(export_links[0])).query)
+        assert qs == {
+            "q": ["amazon"],
+            "month": ["2026-01"],
+            "pending": ["1"],
+            "limit": ["250"],
+        }
 
 
 class TestSearchPage:
@@ -1601,3 +1686,129 @@ class TestReportsPage:
 
         assert b"No income or spending data" in resp.data
         assert b"cdn.plot.ly" not in resp.data
+
+
+class TestTransactionsExport:
+    """GET /transactions/export — CSV download of the current filtered page."""
+
+    @staticmethod
+    def _row(**overrides) -> dict:
+        base = {
+            "transaction_id": "t1",
+            "date": "2026-01-15",
+            "amount": 102.6,
+            "name": "QFC 5807 SEATTLE WA",
+            "merchant_name": "QFC #5807",
+            "effective_category": "GROCERIES",
+            "account_name": "Checking",
+            "account_mask": "1234",
+            "account_type": "DEPOSITORY",
+            "account_subtype": "CHECKING",
+            "institution_name": "Chase",
+            "note": None,
+            "tags": [],
+        }
+        return {**base, **overrides}
+
+    @staticmethod
+    def _capturing(captured: dict):
+        def fake_get_export_rows(**kwargs):
+            captured.update(kwargs)
+            return []
+
+        return fake_get_export_rows
+
+    def test_returns_csv_download(self, client, monkeypatch):
+        captured = {}
+
+        def fake_get_export_rows(**kwargs):
+            captured.update(kwargs)
+            return [self._row()]
+
+        monkeypatch.setattr("analytics.get_export_rows", fake_get_export_rows)
+
+        resp = client.get("/transactions/export?month=2026-01")
+
+        assert resp.status_code == 200
+        assert resp.content_type.startswith("text/csv")
+        disposition = resp.headers["Content-Disposition"]
+        assert "attachment" in disposition
+        assert 'filename="transactions_2026-01.csv"' in disposition
+        assert captured["month"] == "2026-01"
+
+        lines = resp.get_data(as_text=True).strip().split("\n")
+        assert lines[0] == (
+            "Date,Original Date,Account Type,Account Name,Account Number,"
+            "Institution Name,Name,Custom Name,Amount,Description,Category,"
+            "Note,Ignored From,Tax Deductible,Transaction Tags"
+        )
+        assert len(lines) == 2
+        assert "QFC #5807" in lines[1]
+        assert "Chase" in lines[1]
+        assert "102.6" in lines[1]
+        assert "Groceries" in lines[1]
+
+    def test_passes_current_filters(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
+
+        client.get(
+            "/transactions/export?q=amazon&account=acct_9&category=GROCERIES"
+            "&month=2026-03&pending=1&limit=250"
+        )
+
+        assert captured == {
+            "q": "amazon",
+            "limit": 250,
+            "account_id": "acct_9",
+            "category": "GROCERIES",
+            "month": "2026-03",
+            "pending_only": True,
+        }
+
+    def test_defaults_without_params(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
+
+        resp = client.get("/transactions/export")
+
+        assert captured == {
+            "q": None,
+            "limit": 100,
+            "account_id": None,
+            "category": None,
+            "month": None,
+            "pending_only": False,
+        }
+        today = datetime.now().strftime("%Y-%m-%d")
+        assert (
+            f'filename="transactions_{today}.csv"'
+            in resp.headers["Content-Disposition"]
+        )
+
+    def test_bad_limit_falls_back_to_100(self, client, monkeypatch):
+        captured = {}
+        monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
+
+        resp = client.get("/transactions/export?limit=abc")
+
+        assert resp.status_code == 200
+        assert captured["limit"] == 100
+
+    def test_large_limit_passed_through(self, client, monkeypatch):
+        """No upper cap: the export uses whatever limit the page used."""
+        captured = {}
+        monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
+
+        client.get("/transactions/export?limit=9999")
+
+        assert captured["limit"] == 9999
+
+    def test_empty_rows_header_only(self, client, monkeypatch):
+        monkeypatch.setattr("analytics.get_export_rows", lambda **kw: [])
+
+        resp = client.get("/transactions/export")
+
+        body = resp.get_data(as_text=True)
+        assert body.endswith("\n")
+        assert body.count("\n") == 1
