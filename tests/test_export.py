@@ -3,7 +3,6 @@
 import csv
 import io
 from datetime import date
-from pathlib import Path
 
 from export import (
     CSV_HEADER,
@@ -12,8 +11,6 @@ from export import (
     render_transactions_csv,
     rocket_money_category,
 )
-
-EXAMPLE_CSV = Path(__file__).resolve().parent.parent / "example_output.csv"
 
 
 class TestFormatAmount:
@@ -87,11 +84,16 @@ class TestAccountTypeLabel:
 
 
 class TestRenderTransactionsCsv:
-    def test_header_matches_rocket_money_example(self):
-        """The header must exactly match the shipped Rocket Money sample."""
-        with open(EXAMPLE_CSV) as f:
-            expected = f.readline().strip()
-        assert CSV_HEADER == expected.split(",")
+    def test_header_matches_rocket_money_format(self):
+        """The header must exactly match Rocket Money's export column layout.
+        Verified against a real export; the sample file is gitignored (it
+        contains personal data), so the expected row is inlined here."""
+        expected = (
+            "Date,Original Date,Account Type,Account Name,Account Number,"
+            "Institution Name,Name,Custom Name,Amount,Description,Category,"
+            "Note,Ignored From,Tax Deductible,Transaction Tags"
+        )
+        assert ",".join(CSV_HEADER) == expected
 
     def test_empty_rows_header_only(self):
         out = render_transactions_csv([])

@@ -3,7 +3,8 @@ CSV export rendering for the transactions page.
 
 Produces CSV in the same shape as Rocket Money's transaction export, so the
 result can be re-imported into Rocket Money (or any tool that reads that
-format) without a custom import. See example_output.csv for a real sample.
+format) without a custom import. The header row below must keep exactly that
+column layout.
 
 Column mapping from rock_money data:
   Date / Original Date  -> transactions.date
