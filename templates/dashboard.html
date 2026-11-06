@@ -47,7 +47,12 @@
             <div class="bar-track">
               <div class="bar-fill" style="width:{{ row.pct|int }}%"></div>
             </div>
-            <span class="bar-amount">{{ row.total_spend|money }}</span>
+            <span class="bar-amount" style="width:auto;min-width:80px;white-space:nowrap">
+              {{ row.total_spend|fmt_amount }}
+              {% if row.credit_total and row.credit_total > 0 %}
+              <span class="credit" title="Includes {{ row.credit_total|money }} in credits/refunds">*</span>
+              {% endif %}
+            </span>
           </div>
           {% endfor %}
         </div>

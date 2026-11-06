@@ -123,9 +123,12 @@ def dashboard():
     income = analytics.income_by_category(month)
     summary = analytics.monthly_summary(months=6)
 
-    max_spend = float(max((r["total_spend"] for r in spend), default=1) or 1)
+    # Net spend can be negative (refunds outrunning spend) — size bars by magnitude.
+    max_spend = float(
+        max((abs(float(r["total_spend"])) for r in spend), default=1) or 1
+    )
     for r in spend:
-        r["pct"] = float(r["total_spend"]) / max_spend * 100
+        r["pct"] = abs(float(r["total_spend"])) / max_spend * 100
 
     max_income = float(max((r["total_income"] for r in income), default=1) or 1)
     for r in income:
@@ -382,6 +385,8 @@ def reports_page():
     label_by_acct: dict[str, str] = {}
     for r in spend_pairs:
         value = round(float(r["total_spend"]), 2)
+        # Pairs net out to zero or below (refunds outrunning spend on that
+        # account) can't be rendered — Sankey link values must be positive.
         if value <= 0:
             continue
         cat = r["category"] or "Uncategorized"
@@ -453,9 +458,12 @@ def reports_page():
     elif surplus < 0:
         sankey["withdraw"] = -surplus
 
-    max_spend = float(max((r["total_spend"] for r in spend), default=1) or 1)
+    # Net spend can be negative (refunds outrunning spend) — size bars by magnitude.
+    max_spend = float(
+        max((abs(float(r["total_spend"])) for r in spend), default=1) or 1
+    )
     for r in spend:
-        r["pct"] = float(r["total_spend"]) / max_spend * 100
+        r["pct"] = abs(float(r["total_spend"])) / max_spend * 100
 
     max_income = float(max((r["total_income"] for r in income), default=1) or 1)
     for r in income:

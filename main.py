@@ -121,7 +121,7 @@ def cmd_list_txns(args):
 
 
 def cmd_report_spend(args):
-    """Show spending by category for a given month."""
+    """Show net spending by category for a given month."""
     import analytics
     from datetime import datetime
 
@@ -134,18 +134,25 @@ def cmd_report_spend(args):
         print(f"No spending found for {month}.")
         return
 
-    print(f"\nSpending by Category — {month}")
-    print(f"{'Category':<36} {'Spend':>10} {'Txns':>6}")
-    print("-" * 56)
-    total = 0
+    print(f"\nSpending by Category (net of credits) — {month}")
+    print(f"{'Category':<36} {'Net Spend':>11} {'Credits':>10} {'Txns':>6}")
+    print("-" * 66)
+    total = 0.0
+    total_credits = 0.0
     for r in rows:
         cat = (r["category"] or "Uncategorized")[:35]
         spend = float(r["total_spend"])
+        credits = float(r.get("credit_total") or 0)
         count = r["txn_count"]
         total += spend
-        print(f"{cat:<36} ${spend:>9,.2f} {count:>6}")
-    print("-" * 56)
-    print(f"{'TOTAL':<36} ${total:>9,.2f}")
+        total_credits += credits
+        spend_str = f"-${abs(spend):,.2f}" if spend < 0 else f"${spend:,.2f}"
+        cr_str = f"+{credits:,.2f}" if credits > 0 else "—"
+        print(f"{cat:<36} {spend_str:>11} {cr_str:>10} {count:>6}")
+    print("-" * 66)
+    total_str = f"-${abs(total):,.2f}" if total < 0 else f"${total:,.2f}"
+    total_cr = f"+{total_credits:,.2f}" if total_credits > 0 else "—"
+    print(f"{'TOTAL':<36} {total_str:>11} {total_cr:>10}")
 
 
 def cmd_report_monthly(args):
@@ -547,7 +554,9 @@ def main():
     p_acct.set_defaults(func=cmd_accounts)
 
     # report-spend
-    p_rspend = sub.add_parser("report-spend", help="Spending by category for a month")
+    p_rspend = sub.add_parser(
+        "report-spend", help="Net spending by category for a month"
+    )
     p_rspend.add_argument(
         "--month", type=str, help="Month YYYY-MM (default: current month)"
     )
