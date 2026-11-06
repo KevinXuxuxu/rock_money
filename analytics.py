@@ -216,7 +216,19 @@ def get_export_rows(
 
 def spend_by_category(month: str) -> list[dict]:
     """
-    Return spending summed by effective category for a given month.
+    Return NET spending by effective category for a given month.
+
+    Net = the sum of EVERY transaction in the category for the month (debits
+    positive, credits negative), so refunds/credits reduce the category's
+    spend. `credit_total` reports the offsetting credits so the UI can show
+    e.g. 'Travel $5,312 (+$973)'.
+
+    Only categories with at least one debit in the month appear here; a
+    credits-only category is pure income and is reported by
+    income_by_category() instead. Together the two functions partition the
+    month's non-excluded categories — every category lands in exactly one tile.
+
+    Each row: {category, total_spend (net), debit_total, credit_total, txn_count}
 
     Args:
         month: YYYY-MM — e.g. '2026-06'
@@ -229,17 +241,19 @@ def spend_by_category(month: str) -> list[dict]:
                 """
                 SELECT COALESCE(co.category, t.personal_finance_category) AS category,
                        SUM(t.amount) AS total_spend,
-                       COUNT(*)      AS txn_count
+                       SUM(t.amount) FILTER (WHERE t.amount > 0) AS debit_total,
+                       COALESCE(SUM(-t.amount) FILTER (WHERE t.amount < 0), 0) AS credit_total,
+                       COUNT(*) AS txn_count
                 FROM transactions t
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE """
                 + _NOT_SUPERSEDED
                 + f"""
-                  AND t.amount > 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
                       NOT IN {_EXCLUDED_SQL}
                 GROUP BY COALESCE(co.category, t.personal_finance_category)
+                HAVING SUM(t.amount) FILTER (WHERE t.amount > 0) IS NOT NULL
                 ORDER BY total_spend DESC
             """,
                 (f"{month}-01",),
@@ -252,6 +266,13 @@ def income_by_category(month: str) -> list[dict]:
     Return income (credits) summed by effective category for a given month.
     Amounts are returned as positive numbers (negated from raw negative values).
 
+    Only categories with at least one credit and NO debits in the month appear
+    here: a category that also has debits (e.g. TRAVEL with a plane-ticket
+    refund) is a spending category — its credits net against its spend in
+    spend_by_category() instead of inflating income.
+
+    Each row: {category, total_income, txn_count}
+
     Args:
         month: YYYY-MM — e.g. '2026-06'
     """
@@ -262,18 +283,19 @@ def income_by_category(month: str) -> list[dict]:
             cur.execute(
                 """
                 SELECT COALESCE(co.category, t.personal_finance_category) AS category,
-                       SUM(-t.amount) AS total_income,
-                       COUNT(*)       AS txn_count
+                       SUM(-t.amount) FILTER (WHERE t.amount < 0) AS total_income,
+                       COUNT(*) FILTER (WHERE t.amount < 0) AS txn_count
                 FROM transactions t
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
                 WHERE """
                 + _NOT_SUPERSEDED
                 + f"""
-                  AND t.amount < 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
                       NOT IN {_EXCLUDED_SQL}
                 GROUP BY COALESCE(co.category, t.personal_finance_category)
+                HAVING SUM(t.amount) FILTER (WHERE t.amount > 0) IS NULL
+                   AND SUM(-t.amount) FILTER (WHERE t.amount < 0) IS NOT NULL
                 ORDER BY total_income DESC
             """,
                 (f"{month}-01",),
@@ -283,7 +305,13 @@ def income_by_category(month: str) -> list[dict]:
 
 def income_by_account_category(month: str) -> list[dict]:
     """
-    Return income (credits) summed by account and effective category for a month.
+    Return income (credits) summed by account and effective category for a
+    month, restricted to INCOME categories — categories with no debit
+    transactions in the month (same partition as income_by_category). A
+    category that also has debits is a spending category: its credits net
+    against its spend in spend_by_category_account() instead of appearing as
+    an income source here.
+
     Amounts are returned as positive numbers (negated from raw negative values).
     Used by the reports page Sankey diagram (income = source stage).
 
@@ -296,34 +324,57 @@ def income_by_account_category(month: str) -> list[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
+                WITH cat AS (
+                    SELECT COALESCE(co.category, t.personal_finance_category) AS category,
+                           SUM(t.amount) FILTER (WHERE t.amount > 0) AS debits
+                    FROM transactions t
+                    LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                    WHERE """
+                + _NOT_SUPERSEDED
+                + f"""
+                      AND date_trunc('month', t.date) = %s::date
+                      AND COALESCE(co.category, t.personal_finance_category)
+                          NOT IN {_EXCLUDED_SQL}
+                    GROUP BY COALESCE(co.category, t.personal_finance_category)
+                )
                 SELECT t.account_id,
                        a.name AS account_name,
                        a.mask AS account_mask,
                        COALESCE(co.category, t.personal_finance_category) AS category,
-                       SUM(-t.amount) AS total_income,
-                       COUNT(*)       AS txn_count
+                       SUM(-t.amount) FILTER (WHERE t.amount < 0) AS total_income,
+                       COUNT(*) FILTER (WHERE t.amount < 0) AS txn_count
                 FROM transactions t
                 JOIN accounts a ON a.account_id = t.account_id
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                JOIN cat ON cat.category IS NOT DISTINCT FROM
+                         COALESCE(co.category, t.personal_finance_category)
                 WHERE """
                 + _NOT_SUPERSEDED
                 + f"""
-                  AND t.amount < 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
                       NOT IN {_EXCLUDED_SQL}
+                  AND cat.debits IS NULL
                 GROUP BY t.account_id, a.name, a.mask,
                          COALESCE(co.category, t.personal_finance_category)
+                HAVING SUM(-t.amount) FILTER (WHERE t.amount < 0) IS NOT NULL
                 ORDER BY total_income DESC
             """,
-                (f"{month}-01",),
+                (f"{month}-01", f"{month}-01"),
             )
             return [dict(row) for row in cur.fetchall()]
 
 
 def spend_by_category_account(month: str) -> list[dict]:
     """
-    Return spending summed by effective category AND account for a month.
+    Return NET spending by effective category AND account for a month,
+    restricted to SPENDING categories — categories with at least one debit
+    transaction in the month (same partition as spend_by_category).
+
+    `total_spend` is the net of all of the pair's transactions (credits reduce
+    spend). A pair can come back negative when refunds outrun spend on that
+    specific account; the Sankey builder skips non-positive links.
+
     Used by the reports Sankey (spend categories → accounts stage).
 
     Args:
@@ -335,35 +386,57 @@ def spend_by_category_account(month: str) -> list[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
+                WITH cat AS (
+                    SELECT COALESCE(co.category, t.personal_finance_category) AS category,
+                           SUM(t.amount) FILTER (WHERE t.amount > 0) AS debits
+                    FROM transactions t
+                    LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                    WHERE """
+                + _NOT_SUPERSEDED
+                + f"""
+                      AND date_trunc('month', t.date) = %s::date
+                      AND COALESCE(co.category, t.personal_finance_category)
+                          NOT IN {_EXCLUDED_SQL}
+                    GROUP BY COALESCE(co.category, t.personal_finance_category)
+                )
                 SELECT t.account_id,
                        a.name AS account_name,
                        a.mask AS account_mask,
                        a.label AS account_label,
                        COALESCE(co.category, t.personal_finance_category) AS category,
                        SUM(t.amount) AS total_spend,
-                       COUNT(*)       AS txn_count
+                       COUNT(*) AS txn_count
                 FROM transactions t
                 JOIN accounts a ON a.account_id = t.account_id
                 LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                JOIN cat ON cat.category IS NOT DISTINCT FROM
+                         COALESCE(co.category, t.personal_finance_category)
                 WHERE """
                 + _NOT_SUPERSEDED
                 + f"""
-                  AND t.amount > 0
                   AND date_trunc('month', t.date) = %s::date
                   AND COALESCE(co.category, t.personal_finance_category)
                       NOT IN {_EXCLUDED_SQL}
+                  AND cat.debits IS NOT NULL
                 GROUP BY t.account_id, a.name, a.mask, a.label,
                          COALESCE(co.category, t.personal_finance_category)
                 ORDER BY total_spend DESC
             """,
-                (f"{month}-01",),
+                (f"{month}-01", f"{month}-01"),
             )
             return [dict(row) for row in cur.fetchall()]
 
 
 def monthly_summary(months: int = 12) -> list[dict]:
     """
-    Return month-over-month income, spend, and net summary.
+    Return month-over-month income, spend, and net summary using the same
+    category partition as the category tiles (see spend_by_category /
+    income_by_category):
+
+    - spend = NET of every category that has at least one debit in the month
+      (refunds/credits reduce spend)
+    - income = credits of categories that have NO debits in the month
+      (refunds in spending categories never count as income)
 
     Args:
         months: number of calendar months to look back (default 12)
@@ -379,18 +452,27 @@ def monthly_summary(months: int = 12) -> list[dict]:
                        spend,
                        (income - spend) AS net
                 FROM (
-                    SELECT date_trunc('month', t.date)::date AS month,
-                           COALESCE(SUM(CASE WHEN t.amount < 0 THEN -t.amount ELSE 0 END), 0) AS income,
-                           COALESCE(SUM(CASE WHEN t.amount > 0 THEN  t.amount ELSE 0 END), 0) AS spend
-                    FROM transactions t
-                    LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
-                    WHERE """
+                    SELECT cat.month::date AS month,
+                           COALESCE(SUM(cat.credits) FILTER (WHERE cat.debits IS NULL), 0) AS income,
+                           COALESCE(SUM(cat.net) FILTER (WHERE cat.debits IS NOT NULL), 0) AS spend
+                    FROM (
+                        SELECT date_trunc('month', t.date) AS month,
+                               COALESCE(co.category, t.personal_finance_category) AS category,
+                               SUM(t.amount) AS net,
+                               SUM(t.amount) FILTER (WHERE t.amount > 0) AS debits,
+                               SUM(-t.amount) FILTER (WHERE t.amount < 0) AS credits
+                        FROM transactions t
+                        LEFT JOIN category_overrides co ON co.transaction_id = t.transaction_id
+                        WHERE """
                 + _NOT_SUPERSEDED
                 + f"""
-                      AND COALESCE(co.category, t.personal_finance_category)
-                          NOT IN {_EXCLUDED_SQL}
-                    GROUP BY date_trunc('month', t.date)
-                    ORDER BY month DESC
+                          AND COALESCE(co.category, t.personal_finance_category)
+                              NOT IN {_EXCLUDED_SQL}
+                        GROUP BY date_trunc('month', t.date),
+                                 COALESCE(co.category, t.personal_finance_category)
+                    ) cat
+                    GROUP BY cat.month
+                    ORDER BY cat.month DESC
                     LIMIT %s
                 ) sub
                 ORDER BY month

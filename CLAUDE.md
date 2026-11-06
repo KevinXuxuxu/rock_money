@@ -46,6 +46,7 @@ Data flow: `main.py` (CLI) and `web_server.py` (dashboard) → `sync.py` / `anal
 - **`_NOT_SUPERSEDED` guard** (in `analytics.py`): a pending transaction that a posted row already points to via `pending_transaction_id` is excluded, so nothing double-counts before Plaid removes the pending row. Assumes the `transactions` alias is `t`.
 - **Category resolution**: user override (`category_overrides`) > rule match > Plaid `personal_finance_category` > "Uncategorized". `effective_category` is `COALESCE(co.category, t.personal_finance_category)` in SQL.
 - **Rules**: case-insensitive substring match on `merchant_name` (falls back to `name`), `name`, or `personal_finance_category`; first match wins, ordered by `priority DESC, id`. `apply_rules(dry_run=True)` matches ALL transactions (for testing); real apply skips already-overridden rows.
+- **Category aggregations (tiles, Sankey, cash flow)**: `spend_by_category`/`income_by_category` (category tiles), `spend_by_category_account`/`income_by_account_category` (Sankey stages), and `monthly_summary` (cash-flow table) all partition a month's non-excluded categories the same way: categories with ≥1 debit that month → spend side, as the **net** sum (credits reduce spend; the UI marks such totals with an asterisk, e.g. `Travel $5,312*`, with the credit amount in a tooltip); categories with credits and no debits → income side. A category's refund credits are therefore never counted as income. The Sankey additionally drops (category, account) pairs whose net is ≤ 0 (link values can't be negative), so its spend column can exceed the cash-flow spend by exactly the dropped amount. `budget_status` inherits net semantics (refunds reduce spent).
 - **Internal transfers**: paired by bank transfer ref IDs extracted from `name` (regexes in `_TRANSFER_ID_PATTERNS` — Citi `IITCIT…`, Chase `transaction#: N`); amounts must cancel within $0.01. Marked legs get an `INTERNAL TRANSFER` override. Self-heals Plaid's pending→posted ID churn (a reposted leg re-pairs with its already-marked partner). New bank patterns are added to `_TRANSFER_ID_PATTERNS`.
 
 ## Database schema
@@ -76,3 +77,10 @@ Plaid sandbox test credentials: `user_good` / `pass_good`. Phone OTP: `123456`.
 ## Testing
 
 `tests/` never touch a real DB: an autouse fixture replaces `db.get_conn` with a guard that fails loudly on any real connection. Use the `mock_db` fixture (patches `db.get_conn`, yields the mock cursor — set `fetchall`/`fetchone` return values, inspect `execute.call_args` for SQL). `make_txn()` / `make_account()` in `conftest.py` build sample row dicts.
+
+Opt-in integration tests (`tests/test_net_category_integration.py`) run against a REAL Postgres to verify the net-category semantics (tiles, Sankey stages, cash-flow table). They only run when `ROCK_MONEY_TEST_DB_URL` is set, and the fixture hard-refuses any URL that isn't `rock_money_test` — never point it at the live DB:
+
+```bash
+ROCK_MONEY_TEST_DB_URL=postgresql://postgres@host.docker.internal:5432/rock_money_test \
+    uv run pytest tests/test_net_category_integration.py
+```

@@ -171,14 +171,53 @@ class TestSpendByCategory:
         params = mock_db.execute.call_args[0][1]
         assert "2026-03-01" in str(params[0])
 
-    def test_only_positive_amounts_spending(self, mock_db):
-        """Spending = only debits (positive amounts)."""
+    def test_net_total_sums_all_amounts(self, mock_db):
+        """Spending = NET sum of the category's txns (debits positive, credits negative)."""
         mock_db.fetchall.return_value = []
 
         analytics.spend_by_category("2026-06")
 
         sql = mock_db.execute.call_args[0][0]
-        assert "amount > 0" in sql
+        assert "SUM(t.amount) AS total_spend" in sql
+        # No WHERE-side restriction to debits only (credits are netted in)
+        assert "AND t.amount > 0" not in sql
+
+    def test_reports_debit_and_credit_breakdown(self, mock_db):
+        """credit_total lets the UI mark e.g. '$5,312*' (asterisk = includes credits)."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "SUM(t.amount) FILTER (WHERE t.amount > 0) AS debit_total" in sql
+        assert "SUM(-t.amount) FILTER (WHERE t.amount < 0)" in sql
+        assert "credit_total" in sql
+
+    def test_only_categories_with_debits_appear(self, mock_db):
+        """A credits-only category is pure income — it belongs to income_by_category."""
+        mock_db.fetchall.return_value = []
+
+        analytics.spend_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "HAVING SUM(t.amount) FILTER (WHERE t.amount > 0) IS NOT NULL" in sql
+
+    def test_rows_pass_through_credit_breakdown(self, mock_db):
+        mock_db.fetchall.return_value = [
+            {
+                "category": "TRAVEL",
+                "total_spend": 5312.00,  # 6285 debits - 973 credits
+                "debit_total": 6285.00,
+                "credit_total": 973.00,
+                "txn_count": 3,
+            },
+        ]
+
+        result = analytics.spend_by_category("2026-06")
+
+        assert result[0]["total_spend"] == 5312.00
+        assert result[0]["debit_total"] == 6285.00
+        assert result[0]["credit_total"] == 973.00
 
     def test_left_joins_category_overrides(self, mock_db):
         """Regression: was using raw personal_finance_category, ignoring overrides."""
@@ -242,6 +281,24 @@ class TestIncomeByCategory:
 
         sql = mock_db.execute.call_args[0][0]
         assert "amount < 0" in sql
+
+    def test_omits_categories_with_any_debit(self, mock_db):
+        """A category that also has debits (e.g. TRAVEL refunds) is spend, not income."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "HAVING SUM(t.amount) FILTER (WHERE t.amount > 0) IS NULL" in sql
+
+    def test_requires_at_least_one_credit(self, mock_db):
+        """Zero-amount-only categories don't show up as empty income rows."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "SUM(-t.amount) FILTER (WHERE t.amount < 0) IS NOT NULL" in sql
 
     def test_negates_amount_for_positive_display(self, mock_db):
         """SUM(-t.amount) so returned total_income values are positive."""
@@ -337,6 +394,27 @@ class TestIncomeByAccountCategory:
 
         sql = mock_db.execute.call_args[0][0]
         assert "a.mask AS account_mask" in sql
+
+    def test_only_income_categories_appear(self, mock_db):
+        """Restricted to categories with NO debits that month — same partition as
+        income_by_category, so refunds in spending categories aren't income."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "WITH cat AS (" in sql
+        assert "AND cat.debits IS NULL" in sql
+        assert "IS NOT DISTINCT FROM" in sql  # NULL-safe category join
+
+    def test_never_counts_debits(self, mock_db):
+        """Even within income categories, only credits are summed."""
+        mock_db.fetchall.return_value = []
+
+        analytics.income_by_account_category("2026-06")
+
+        sql = mock_db.execute.call_args[0][0]
+        assert "SUM(-t.amount) FILTER (WHERE t.amount < 0) AS total_income" in sql
 
     def test_joins_accounts_for_account_names(self, mock_db):
         mock_db.fetchall.return_value = []
@@ -518,15 +596,18 @@ class TestSpendByCategoryAccount:
         assert "GROUP BY t.account_id" in sql
         assert "COALESCE(co.category" in sql
 
-    def test_only_debits_untouched_amounts(self, mock_db):
-        """Spend = positive raw amounts, NOT negated (unlike income queries)."""
+    def test_only_debit_categories_net_spend(self, mock_db):
+        """Spend = NET of all the pair's txns (credits reduce spend), restricted
+        to categories with at least one debit that month (same partition as
+        spend_by_category). Pairs may come back negative."""
         mock_db.fetchall.return_value = []
 
         analytics.spend_by_category_account("2026-06")
 
         sql = mock_db.execute.call_args[0][0]
-        assert "t.amount > 0" in sql
-        assert "SUM(t.amount)" in sql
+        assert "SUM(t.amount) AS total_spend" in sql
+        assert "AND cat.debits IS NOT NULL" in sql
+        # No negation anywhere: the net keeps the raw sign convention
         assert "SUM(-t.amount)" not in sql
 
     def test_selects_account_label(self, mock_db):
@@ -591,16 +672,20 @@ class TestMonthlySummary:
         assert params[-1] == 3
 
     def test_sign_convention(self, mock_db):
-        """Income = negated negative amounts. Spend = positive amounts."""
+        """Same category partition as the tiles: spend = NET of debit
+        categories (refunds reduce spend); income = credits of categories
+        with no debits (refunds in spending categories aren't income)."""
         mock_db.fetchall.return_value = []
 
         analytics.monthly_summary()
 
         sql = mock_db.execute.call_args[0][0]
-        # Income: negate credits (amount < 0)
-        assert "WHEN t.amount < 0 THEN -t.amount" in sql
-        # Spend: sum debits (amount > 0)
-        assert "WHEN t.amount > 0 THEN  t.amount" in sql
+        # Income: credits of categories whose debits are NULL (no debits)
+        assert "SUM(cat.credits) FILTER (WHERE cat.debits IS NULL), 0) AS income" in sql
+        # Spend: net of categories that have debits
+        assert "SUM(cat.net) FILTER (WHERE cat.debits IS NOT NULL), 0) AS spend" in sql
+        # Net keeps the raw sign convention (credits stored negated)
+        assert "SUM(-t.amount) FILTER (WHERE t.amount < 0) AS credits" in sql
 
 
 # ── Phase 3: Category resolution ─────────────────────────────────────────────
