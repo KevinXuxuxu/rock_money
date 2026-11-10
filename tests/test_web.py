@@ -62,6 +62,27 @@ def _summary_rows():
     ]
 
 
+def _stub_report_reads(monkeypatch, calls=None):
+    """Silence every query /reports runs (the page's own tests spell them out one
+    by one). `calls` collects the positional args so a test can see which month
+    the page asked for."""
+
+    def noop(*args, **kwargs):
+        if calls is not None:
+            calls.extend(args)
+        return []
+
+    for name in (
+        "monthly_summary",
+        "spend_by_category",
+        "income_by_category",
+        "budget_status",
+        "income_by_account_category",
+        "spend_by_category_account",
+    ):
+        monkeypatch.setattr(f"analytics.{name}", noop)
+
+
 class TestTimeagoFilter:
     def test_none_is_never(self):
         assert web_server.timeago_filter(None) == "never"
@@ -414,9 +435,12 @@ class TestTransactionsPage:
     @patch("analytics.get_categories")
     @patch("analytics.get_accounts")
     @patch("analytics.get_transactions")
-    def test_limit_has_no_upper_cap(
+    def test_limit_is_capped(
         self, mock_txns, mock_accts, mock_cats, mock_views, client
     ):
+        """?limit only picks the page size: it must not let one request pull the
+        whole transactions table into memory, or hand Postgres a LIMIT that
+        overflows an integer."""
         mock_accts.return_value = []
         mock_txns.return_value = []
         mock_cats.return_value = []
@@ -425,7 +449,31 @@ class TestTransactionsPage:
         resp = client.get("/transactions?limit=5000")
 
         assert resp.status_code == 200
-        assert mock_txns.call_args.kwargs["limit"] == 5000
+        assert mock_txns.call_args.kwargs["limit"] == 1000
+
+        resp = client.get("/transactions?limit=99999999999999999999")
+
+        assert resp.status_code == 200
+        assert mock_txns.call_args.kwargs["limit"] == 1000
+
+    @patch("db.list_views")
+    @patch("analytics.get_categories")
+    @patch("analytics.get_accounts")
+    @patch("analytics.get_transactions")
+    def test_unparseable_month_is_dropped_not_queried(
+        self, mock_txns, mock_accts, mock_cats, mock_views, client
+    ):
+        """A junk month must not reach the SQL date parameter (it used to, and the
+        date cast blew up)."""
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_cats.return_value = []
+        mock_views.return_value = []
+
+        resp = client.get("/transactions?month=1-1-1")
+
+        assert resp.status_code == 200
+        assert mock_txns.call_args.kwargs["month"] is None
 
     @patch("db.list_views")
     @patch("analytics.get_categories")
@@ -988,6 +1036,23 @@ class TestRulesPage:
 
 
 class TestReportsPage:
+    @pytest.mark.parametrize(
+        "bad_month",
+        ["0", "1-1-1", "2026-13", "abcdefgh", "../../etc/passwd", "2026-05%00"],
+    )
+    def test_unparseable_month_falls_back_to_this_month(
+        self, bad_month, client, monkeypatch
+    ):
+        """Every one of these was a 500 before: datetime.strptime('%Y-%m') raised
+        on the raw query param and nothing caught it."""
+        calls = []
+        _stub_report_reads(monkeypatch, calls)
+
+        resp = client.get(f"/reports?month={bad_month}")
+
+        assert resp.status_code == 200
+        assert set(calls) == {datetime.now().strftime("%Y-%m")}
+
     @patch("analytics.spend_by_category_account")
     @patch("analytics.income_by_account_category")
     @patch("analytics.income_by_category")
@@ -1795,14 +1860,48 @@ class TestTransactionsExport:
         assert resp.status_code == 200
         assert captured["limit"] == 100
 
-    def test_large_limit_passed_through(self, client, monkeypatch):
-        """No upper cap: the export uses whatever limit the page used."""
+    def test_large_limit_is_capped(self, client, monkeypatch):
+        """The export shares the page's cap, so it can't pull more rows than the
+        page it mirrors."""
         captured = {}
         monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
 
-        client.get("/transactions/export?limit=9999")
+        resp = client.get("/transactions/export?limit=9999")
 
-        assert captured["limit"] == 9999
+        assert resp.status_code == 200
+        assert captured["limit"] == 1000
+
+    def test_unparseable_month_is_dropped_and_filename_stays_plain(
+        self, client, monkeypatch
+    ):
+        """The raw month used to be pasted into Content-Disposition, so
+        '?month=../../etc/passwd' downloaded a file named
+        'transactions_../../etc/passwd.csv' and the same junk went into the SQL
+        date parameter."""
+        captured = {}
+        monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
+
+        resp = client.get("/transactions/export?month=../../etc/passwd")
+
+        assert resp.status_code == 200
+        assert captured["month"] is None
+        filename = resp.headers["Content-Disposition"].split('filename="')[1]
+        assert "/" not in filename and ".." not in filename
+        assert filename == f'transactions_{datetime.now():%Y-%m-%d}.csv"'
+
+    def test_quotes_and_newlines_in_month_do_not_reach_the_header(
+        self, client, monkeypatch
+    ):
+        """Same entry point with a quote + CRLF payload: rejected as an invalid
+        month, so nothing lands in the response headers."""
+        captured = {}
+        monkeypatch.setattr("analytics.get_export_rows", self._capturing(captured))
+
+        resp = client.get("/transactions/export?month=x%22%0d%0aSet-Cookie:pwned%3D1")
+
+        assert resp.status_code == 200
+        assert captured["month"] is None
+        assert "pwned" not in str(resp.headers)
 
     def test_empty_rows_header_only(self, client, monkeypatch):
         monkeypatch.setattr("analytics.get_export_rows", lambda **kw: [])

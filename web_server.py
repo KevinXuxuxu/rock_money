@@ -114,6 +114,45 @@ def _safe_redirect_target(target: str | None) -> str | None:
     return target
 
 
+# Cap for the ?limit= override on /transactions and its CSV export. The page and
+# the export share it so an export can never pull more rows than the page shows.
+MAX_ROWS_PER_PAGE = 1000
+
+
+def _parse_month(raw: str | None) -> str | None:
+    """Return raw when it is a real YYYY-MM month, else None.
+
+    Anything else is junk: it used to reach datetime.strptime (500 on the reports
+    page), the SQL date parameter, and the CSV download filename.
+    """
+    if not raw:
+        return None
+    try:
+        datetime.strptime(raw, "%Y-%m")
+    except ValueError:
+        return None
+    return raw
+
+
+def _list_filters() -> dict:
+    """Parse the query params the transactions page and its CSV export share, so
+    the two always filter (and limit) identically. Unparseable month means no
+    month filter; limit stays between 1 and MAX_ROWS_PER_PAGE.
+    """
+    try:
+        limit = min(MAX_ROWS_PER_PAGE, max(1, int(request.args.get("limit", 100))))
+    except ValueError:
+        limit = 100
+    return {
+        "q": request.args.get("q", "").strip() or None,
+        "account_id": request.args.get("account") or None,
+        "category": request.args.get("category") or None,
+        "month": _parse_month(request.args.get("month")),
+        "pending_only": request.args.get("pending") == "1",
+        "limit": limit,
+    }
+
+
 @app.get("/")
 def dashboard():
     month = datetime.now().strftime("%Y-%m")
@@ -234,24 +273,9 @@ def api_exchange():
 
 @app.get("/transactions")
 def transactions_page():
-    q = request.args.get("q", "").strip() or None
-    account_id = request.args.get("account") or None
-    category = request.args.get("category") or None
-    month = request.args.get("month") or None
-    pending_only = request.args.get("pending") == "1"
-    try:
-        limit = max(1, int(request.args.get("limit", 100)))
-    except ValueError:
-        limit = 100
+    parsed = _list_filters()
 
-    txns = analytics.get_transactions(
-        q=q,
-        limit=limit,
-        account_id=account_id,
-        category=category,
-        month=month,
-        pending_only=pending_only,
-    )
+    txns = analytics.get_transactions(**parsed)
     accounts = analytics.get_accounts()
     categories = analytics.get_categories()
     views = db.list_views()
@@ -268,16 +292,16 @@ def transactions_page():
 
     # CSV export of exactly this page: same filters, same limit. Only
     # non-empty params are sent so the link stays readable.
-    export_params: dict = {"limit": limit}
-    if q:
-        export_params["q"] = q
-    if account_id:
-        export_params["account"] = account_id
-    if category:
-        export_params["category"] = category
-    if month:
-        export_params["month"] = month
-    if pending_only:
+    export_params: dict = {"limit": parsed["limit"]}
+    if parsed["q"]:
+        export_params["q"] = parsed["q"]
+    if parsed["account_id"]:
+        export_params["account"] = parsed["account_id"]
+    if parsed["category"]:
+        export_params["category"] = parsed["category"]
+    if parsed["month"]:
+        export_params["month"] = parsed["month"]
+    if parsed["pending_only"]:
         export_params["pending"] = "1"
     export_url = "/transactions/export?" + urlencode(export_params)
 
@@ -290,12 +314,12 @@ def transactions_page():
         return_url=return_url,
         export_url=export_url,
         filters={
-            "q": q or "",
-            "account": account_id or "",
-            "category": category or "",
-            "month": month or "",
-            "pending": "1" if pending_only else "",
-            "limit": limit,
+            "q": parsed["q"] or "",
+            "account": parsed["account_id"] or "",
+            "category": parsed["category"] or "",
+            "month": parsed["month"] or "",
+            "pending": "1" if parsed["pending_only"] else "",
+            "limit": parsed["limit"],
         },
     )
 
@@ -306,26 +330,12 @@ def transactions_export():
     Download the current filtered page as CSV in Rocket Money's export format
     (same filters and limit as the /transactions page that linked here).
     """
-    q = request.args.get("q", "").strip() or None
-    account_id = request.args.get("account") or None
-    category = request.args.get("category") or None
-    month = request.args.get("month") or None
-    pending_only = request.args.get("pending") == "1"
-    try:
-        limit = max(1, int(request.args.get("limit", 100)))
-    except ValueError:
-        limit = 100
+    parsed = _list_filters()
 
-    rows = analytics.get_export_rows(
-        q=q,
-        limit=limit,
-        account_id=account_id,
-        category=category,
-        month=month,
-        pending_only=pending_only,
-    )
+    rows = analytics.get_export_rows(**parsed)
     csv_text = export.render_transactions_csv(rows)
-    suffix = month if month else datetime.now().strftime("%Y-%m-%d")
+    # `month` is validated, so it can never reach the download filename as junk.
+    suffix = parsed["month"] or datetime.now().strftime("%Y-%m-%d")
     filename = f"transactions_{suffix}.csv"
     return Response(
         csv_text,
@@ -342,7 +352,7 @@ def search_page():
 @app.get("/reports")
 def reports_page():
     this_month = datetime.now().strftime("%Y-%m")
-    month = request.args.get("month") or this_month
+    month = _parse_month(request.args.get("month")) or this_month
     # Clamp to the current month — there's no data in the future.
     if month > this_month:
         month = this_month
