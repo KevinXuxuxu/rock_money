@@ -1,10 +1,35 @@
+import fcntl
 import logging
+import tempfile
+from pathlib import Path
 
 import analytics
 import db
 from plaid_client import PlaidClient
 
 _log = logging.getLogger(__name__)
+
+# Path of the sync lock below. A module constant so tests can point it at a
+# private temp file.
+LOCK_PATH = Path(tempfile.gettempdir()) / "rock_money_sync.lock"
+
+
+def _try_sync_lock():
+    """Take the "one sync at a time" lock, or return None if a sync is already
+    running.
+
+    The dashboard runs under gunicorn with 2 workers and `main.py sync` can
+    overlap with the Sync button, so this has to be a real cross-process lock,
+    not a threading.Lock. The kernel drops it when the holder exits, so a worker
+    killed mid-sync cannot wedge syncing forever.
+    """
+    handle = open(LOCK_PATH, "a")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        handle.close()
+        return None
+    return handle
 
 
 def sync_item(item_id: str, access_token: str) -> dict:
@@ -50,7 +75,24 @@ def sync_item(item_id: str, access_token: str) -> dict:
     return total
 
 
-def sync_all() -> None:
+def sync_all() -> bool:
+    """Sync every linked item, unless another sync is still running.
+
+    Returns False when the run was skipped, so the caller can report that
+    instead of claiming a sync that never happened.
+    """
+    lock = _try_sync_lock()
+    if lock is None:
+        _log.warning("another sync is still running — skipping this one")
+        return False
+    try:
+        _sync_all()
+    finally:
+        lock.close()
+    return True
+
+
+def _sync_all() -> None:
     """Syncs all linked items stored in the database."""
     items = db.list_items()
     if not items:

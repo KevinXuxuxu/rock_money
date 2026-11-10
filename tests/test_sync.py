@@ -1,11 +1,19 @@
 """Tests for sync.py — focus on auto-rule-apply behaviour added after sync_all."""
 
+import fcntl
 import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import sync
+
+
+@pytest.fixture(autouse=True)
+def _private_lock_file(tmp_path, monkeypatch):
+    """Point the cross-process sync lock at this test's own temp file, so runs
+    never share the real /tmp lock."""
+    monkeypatch.setattr(sync, "LOCK_PATH", tmp_path / "sync.lock")
 
 
 @pytest.fixture
@@ -139,3 +147,53 @@ class TestSyncAllRuleApplication:
 
         assert "Sync complete" in caplog.text
         assert "Chase" in caplog.text
+
+
+class TestSyncLock:
+    """sync_all() runs under 2 gunicorn workers and can overlap with
+    `main.py sync`, so it must refuse to run twice at the same time."""
+
+    def test_runs_and_returns_true_when_the_lock_is_free(self):
+        with patch("db.list_items", return_value=[]) as mock_items:
+            assert sync.sync_all() is True
+
+        mock_items.assert_called_once_with()
+
+    def test_skips_and_returns_false_while_another_sync_holds_the_lock(self):
+        held = open(sync.LOCK_PATH, "a")
+        fcntl.flock(held, fcntl.LOCK_EX)
+
+        with patch("db.list_items") as mock_items, patch("sync.sync_item") as item:
+            assert sync.sync_all() is False
+
+        item.assert_not_called()
+        mock_items.assert_not_called()
+        held.close()
+
+    def test_lock_is_released_after_a_run(self):
+        """A finished sync must not block the next one."""
+        with patch("db.list_items", return_value=[]) as mock_items:
+            assert sync.sync_all() is True
+            assert sync.sync_all() is True
+
+        assert mock_items.call_count == 2
+
+    def test_lock_is_released_after_a_crash(self):
+        """Same shape as a worker killed mid-sync: whatever is raised, the lock
+        comes back, so syncing is not wedged for good."""
+        with patch("db.list_items", side_effect=[RuntimeError("db gone"), []]):
+            with pytest.raises(RuntimeError):
+                sync.sync_all()
+            assert sync.sync_all() is True
+
+    def test_error_inside_an_item_does_not_stop_the_run(self, mock_db):
+        """Per-item failures are caught inside the sync, which still counts as
+        having run (and still gives the lock back)."""
+        mock_db.fetchone.return_value = ("access-token-xyz",)
+        with (
+            patch("db.list_items", return_value=[{"item_id": "i1"}]),
+            patch("sync.sync_item", side_effect=Exception("Plaid error")),
+            patch("db.list_category_rules", return_value=[]),
+            patch("analytics.detect_internal_transfers", return_value=[]),
+        ):
+            assert sync.sync_all() is True

@@ -29,7 +29,7 @@ Data flow: `main.py` (CLI) and `web_server.py` (dashboard) → `sync.py` / `anal
 
 **`db.py`** — raw psycopg2, `ThreadedConnectionPool`. All writes are `ON CONFLICT DO UPDATE` upserts (idempotent). `get_conn()` context manager: acquire → commit/rollback → release. `execute_values` batch inserts: tuple length must exactly match `%s` count in `template=`.
 
-**`sync.py`** — cursor loop per item: load cursor → fetch pages → upsert accounts/txns → delete removed → persist cursor **per page** (crash-safe). After all items: `analytics.apply_rules()` then `analytics.detect_internal_transfers()`.
+**`sync.py`** — cursor loop per item: load cursor → fetch pages → upsert accounts/txns → delete removed → persist cursor **per page** (crash-safe). The whole run holds a `flock` on `LOCK_PATH` (`$TMPDIR/rock_money_sync.lock`), so a second sync from another worker or process is refused instead of doubling up — `sync_all()` returns False when it skipped. After all items: `analytics.apply_rules()` then `analytics.detect_internal_transfers()`.
 
 **`analytics.py`** — all read queries + rule engine + transfer detection. See "Domain rules" below.
 

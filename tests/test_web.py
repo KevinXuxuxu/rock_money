@@ -285,7 +285,7 @@ class TestAccountsPage:
 class TestSyncAccounts:
     @patch("sync.sync_all")
     def test_redirects_on_success(self, mock_sync, client):
-        mock_sync.return_value = None
+        mock_sync.return_value = True
         resp = client.post("/accounts/sync")
         assert resp.status_code == 302
         assert "/accounts" in resp.headers["Location"]
@@ -294,7 +294,7 @@ class TestSyncAccounts:
     @patch("analytics.get_accounts")
     @patch("sync.sync_all")
     def test_flashes_success(self, mock_sync, mock_accts, client):
-        mock_sync.return_value = None
+        mock_sync.return_value = True
         mock_accts.return_value = []
         resp = client.post("/accounts/sync", follow_redirects=True)
         assert b"Sync complete" in resp.data
@@ -307,6 +307,17 @@ class TestSyncAccounts:
         resp = client.post("/accounts/sync", follow_redirects=True)
         assert b"Sync failed" in resp.data
         assert b"connection refused" in resp.data
+
+    @patch("analytics.get_accounts")
+    @patch("sync.sync_all")
+    def test_deferred_to_running_sync_says_so(self, mock_sync, mock_accts, client):
+        """sync_all returns False when it skipped the run; the page must not
+        claim the sync completed."""
+        mock_sync.return_value = False
+        mock_accts.return_value = []
+        resp = client.post("/accounts/sync", follow_redirects=True)
+        assert b"Sync complete" not in resp.data
+        assert b"already running" in resp.data
 
 
 class TestApiLinkToken:

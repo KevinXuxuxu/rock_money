@@ -14,6 +14,9 @@ local, no monthly fee and no third party holding onto your data.
 - Incremental transaction sync using Plaid's `/transactions/sync` cursor API.
   Crash-safe: cursors are persisted per-page so a re-run never re-fetches.
 - Idempotent upserts — running `sync` repeatedly is safe.
+- One sync at a time: the run holds a lock file, so a second sync (the other
+  dashboard worker, or `sync` started by hand) is refused instead of fetching the
+  same pages twice.
 - Pending transactions are counted in stats; a pending row already superseded
   by its posted twin is excluded so nothing is double-counted.
 - Cascading deletes: removing an item (via `remove-item` or the Accounts

@@ -18,4 +18,6 @@ USER appuser
 
 EXPOSE 8123
 
-CMD ["gunicorn", "web_server:app", "--bind", "0.0.0.0:8123", "--workers", "2", "--worker-tmp-dir", "/tmp"]
+# --timeout: the Sync button runs the whole Plaid fetch inside the request, and a
+# first sync of a real account needs far longer than gunicorn's 30s default.
+CMD ["gunicorn", "web_server:app", "--bind", "0.0.0.0:8123", "--workers", "2", "--timeout", "600", "--worker-tmp-dir", "/tmp"]

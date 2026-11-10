@@ -219,11 +219,17 @@ def remove_item(item_id):
 @app.post("/accounts/sync")
 def sync_accounts():
     try:
-        sync_mod.sync_all()
-        flash("Sync complete.", "success")
+        # sync_all returns False when another sync already holds the lock, so a
+        # second click says that instead of reporting a sync that never ran.
+        ran = sync_mod.sync_all()
     except Exception as exc:
         _log.error("sync failed: %s", exc)
         flash(f"Sync failed: {exc}", "error")
+        return redirect(url_for("accounts_page"))
+    if ran:
+        flash("Sync complete.", "success")
+    else:
+        flash("A sync is already running — try again in a minute.", "error")
     return redirect(url_for("accounts_page"))
 
 
