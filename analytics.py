@@ -633,7 +633,9 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
     """
     Find TRANSFER_IN/OUT pairs that share a bank-assigned transfer ID and whose
     amounts cancel out (within $0.01). ID is extracted from the name field
-    (falling back to merchant_name) using _TRANSFER_ID_PATTERNS.
+    (falling back to merchant_name) using _TRANSFER_ID_PATTERNS. A pair is only
+    accepted when the two legs sit in DIFFERENT accounts — see the guard in the
+    pairing loop.
 
     Skips transactions that have a manual/rule override (any category other
     than 'INTERNAL TRANSFER'). Legs previously marked 'INTERNAL TRANSFER' by
@@ -653,8 +655,8 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT t.transaction_id, t.amount, t.name, t.merchant_name,
-                       a.name AS account_name
+                SELECT t.transaction_id, t.account_id, t.amount, t.name,
+                       t.merchant_name, a.name AS account_name
                 FROM transactions t
                 JOIN accounts a ON a.account_id = t.account_id
                 WHERE """
@@ -688,6 +690,18 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
             )
             continue
         a, b = txns
+        # A real transfer moves money BETWEEN two accounts. Two canceling legs in
+        # the SAME account are a purchase plus its refund (the refund text repeats
+        # the original "transaction#: N"), so they share a reference id and cancel
+        # to zero without any money moving. Marking those as INTERNAL TRANSFER
+        # would erase real spending from every spend/income report.
+        if a["account_id"] == b["account_id"]:
+            _log.warning(
+                "detect_internal_transfers: %s has both legs in account %s, skipping",
+                tid,
+                a["account_name"],
+            )
+            continue
         if abs(float(a["amount"]) + float(b["amount"])) >= 0.01:
             _log.warning(
                 "detect_internal_transfers: amounts don't cancel for transfer_id=%s "

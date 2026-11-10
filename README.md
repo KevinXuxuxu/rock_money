@@ -22,7 +22,10 @@ local, no monthly fee and no third party holding onto your data.
 **Internal transfer detection**
 - Runs automatically after every sync (or standalone via `detect-transfers`).
 - Matches transfer legs by bank-assigned reference IDs (Citi `IITCIT…`, Chase
-  `transaction#: N` today) and requires the amounts to cancel within $0.01.
+  `transaction#: N` today) and requires the amounts to cancel within $0.01. Only
+  pairs that sit in two different accounts count — a purchase and its refund in
+  the same account share a reference number and cancel out, but that is not a
+  transfer and stays in your spending figures.
 - Marked pairs get an `INTERNAL TRANSFER` category and are excluded from
   spend/income aggregations so moving money between your own accounts never
   distorts reports.

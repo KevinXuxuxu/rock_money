@@ -1232,9 +1232,12 @@ class TestDetectInternalTransfers:
     """detect_internal_transfers() — transfer pair detection and override writing."""
 
     # DB now returns individual transactions; pairing happens in Python.
+    # Each leg carries the account_id the pairing guard needs: a pair only counts
+    # when the two legs sit in different accounts.
     _TXNS = [
         {
             "transaction_id": "txn_out",
+            "account_id": "acct_personal",
             "amount": 500.00,
             "name": "IITCITA1234BCDE7",
             "merchant_name": None,
@@ -1242,6 +1245,7 @@ class TestDetectInternalTransfers:
         },
         {
             "transaction_id": "txn_in",
+            "account_id": "acct_joint",
             "amount": -500.00,
             "name": "IITCITA1234BCDE7",
             "merchant_name": None,
@@ -1473,6 +1477,7 @@ class TestDetectInternalTransfers:
         mock_db.fetchall.return_value = [
             {
                 "transaction_id": "txn_citi_out",
+                "account_id": "acct_citi",
                 "amount": 1000.00,
                 "name": "Iitcita1234bcde7",  # Plaid: GENERAL_MERCHANDISE in prod
                 "merchant_name": None,
@@ -1480,6 +1485,7 @@ class TestDetectInternalTransfers:
             },
             {
                 "transaction_id": "txn_citi_in",
+                "account_id": "acct_chase",
                 "amount": -1000.00,
                 "name": "IIT CITIBANK CITIXFR IITCITA1234BCDE7 WEB ID: 1234567890",
                 "merchant_name": None,
@@ -1500,6 +1506,7 @@ class TestDetectInternalTransfers:
         mock_db.fetchall.return_value = [
             {
                 "transaction_id": "txn_citi_out",
+                "account_id": "acct_citi",
                 "amount": 1000.00,
                 "name": "Iitcita1234bcde7",
                 "merchant_name": None,
@@ -1507,6 +1514,7 @@ class TestDetectInternalTransfers:
             },
             {
                 "transaction_id": "txn_citi_in",
+                "account_id": "acct_chase",
                 "amount": -1000.00,
                 "name": "IIT CITIBANK CITIXFR IITCITA1234BCDE7 WEB ID: 1234567890",
                 "merchant_name": None,
@@ -1527,6 +1535,7 @@ class TestDetectInternalTransfers:
         mock_db.fetchall.return_value = [
             {
                 "transaction_id": "txn_chase_out",
+                "account_id": "acct_chase_sav",
                 "amount": 500.00,
                 "name": "Online Transfer from CHK ...1234 transaction#: 10000000001",
                 "merchant_name": None,
@@ -1534,6 +1543,7 @@ class TestDetectInternalTransfers:
             },
             {
                 "transaction_id": "txn_chase_in",
+                "account_id": "acct_chase_chk",
                 "amount": -500.00,
                 "name": "Online Transfer to CHK ...5678 transaction#: 10000000001 05/22",
                 "merchant_name": None,
@@ -1549,6 +1559,74 @@ class TestDetectInternalTransfers:
             "txn_chase_in",
         }
         assert pairs[0]["transfer_id"] == "10000000001"
+
+    def test_same_account_pair_is_not_a_transfer(self, mock_db):
+        """A $50 purchase and its $50 refund, both in Checking, both carrying the
+        same Chase 'transaction#' reference (the refund quotes the original
+        transaction number). They share an id and cancel to zero, but no money
+        moved between accounts — pairing them would drop a real purchase and its
+        refund out of every spend report."""
+        mock_db.fetchall.return_value = [
+            {
+                "transaction_id": "txn_buy",
+                "account_id": "acct_chk",
+                "amount": 50.00,
+                "name": "AMAZON MKTPLACE PMTS transaction#: 991",
+                "merchant_name": "Amazon",
+                "account_name": "Checking",
+            },
+            {
+                "transaction_id": "txn_refund",
+                "account_id": "acct_chk",
+                "amount": -50.00,
+                "name": "AMAZON REFUND RE: transaction#: 991",
+                "merchant_name": "Amazon",
+                "account_name": "Checking",
+            },
+        ]
+
+        with patch("db.upsert_category_override") as mock_upsert:
+            pairs = analytics.detect_internal_transfers(dry_run=False)
+
+        assert pairs == []
+        mock_upsert.assert_not_called()
+
+    def test_cross_account_pair_still_detected(self, mock_db):
+        """The same names and amounts as the refund case above, one leg moved to
+        another account: that IS a transfer and must still be paired."""
+        mock_db.fetchall.return_value = [
+            {
+                "transaction_id": "txn_out",
+                "account_id": "acct_chk",
+                "amount": 50.00,
+                "name": "TRANSFER FROM CHK transaction#: 991",
+                "merchant_name": None,
+                "account_name": "Checking",
+            },
+            {
+                "transaction_id": "txn_in",
+                "account_id": "acct_sav",
+                "amount": -50.00,
+                "name": "TRANSFER TO CHK transaction#: 991",
+                "merchant_name": None,
+                "account_name": "Savings",
+            },
+        ]
+
+        pairs = analytics.detect_internal_transfers(dry_run=True)
+
+        assert len(pairs) == 1
+        assert pairs[0]["account_a"] == "Checking"
+        assert pairs[0]["account_b"] == "Savings"
+
+    def test_sql_selects_account_id(self, mock_db):
+        """Pairing reads account_id off each row, so the query must return it
+        (checked in the SELECT list — the JOIN clause also mentions the column)."""
+        mock_db.fetchall.return_value = []
+
+        analytics.detect_internal_transfers(dry_run=True)
+
+        assert "t.account_id," in mock_db.execute.call_args[0][0]
 
 
 class TestInternalCategoryFiltering:
