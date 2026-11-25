@@ -179,6 +179,12 @@
     /* ── Empty state ───────────────────────────────────────── */
     .empty { padding: 32px; text-align: center; color: var(--muted); }
 
+    /* ── Sankey (reports): designed for the landscape view. On narrow screens
+       the whole diagram — bars, links, labels and numbers — is rotated 90°
+       so it reads when the phone is tilted. */
+    .sankey-wrap { position: relative; }
+    #sankey-chart { height: 560px; }
+
     /* ── Icon button ───────────────────────────────────────── */
     .btn-icon { background: none; border: none; cursor: pointer; color: var(--muted);
                 font-size: 16px; padding: 4px 8px; border-radius: 6px; }
@@ -187,6 +193,21 @@
     /* ── Responsive ────────────────────────────────────────── */
     @media (max-width: 768px) {
       main { padding: 20px 16px; }
+      /* Rotated layout for portrait phones: the full-size diagram fit the
+         landscape view when the phone is tilted. 806px chart width becomes
+         the vertical scroll height; 334px becomes the visual width. */
+      .sankey-wrap { height: 806px; overflow: hidden; }
+      #sankey-chart {
+        position: absolute;
+        top: 0;
+        /* center the rotated diagram inside the wrapper: the 334px-wide
+           chart maps to 334px of visual width and 806px of visual height */
+        left: calc((100% + 334px) / 2);
+        width: 806px;
+        height: 334px;
+        transform: rotate(90deg);
+        transform-origin: top left;
+      }
       h2 { font-size: 19px; }
       .row { grid-template-columns: 1fr; }
       .stat-val { font-size: 22px; }

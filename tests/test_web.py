@@ -1047,6 +1047,56 @@ class TestRulesPage:
 
 
 class TestReportsPage:
+    def test_sankey_rotated_on_narrow_viewports(self, client, monkeypatch):
+        """On narrow screens the whole diagram — bars, links, labels and
+        numbers — is rotated 90° (CSS) so the graph reads when the phone is
+        tilted. The wrapper owns the sizing; the SVG is not re-laid-out."""
+        _stub_report_reads(monkeypatch)
+
+        monkeypatch.setattr(
+            "analytics.spend_by_category",
+            lambda month: [{"category": "TRAVEL", "total_spend": 5100.0, "txn_count": 2}],
+        )
+        monkeypatch.setattr(
+            "analytics.spend_by_category_account",
+            lambda month: [
+                {
+                    "account_id": "a1",
+                    "account_name": "Chase Checking",
+                    "account_mask": "*1234",
+                    "account_label": None,
+                    "category": "TRAVEL",
+                    "total_spend": 5100.0,
+                    "txn_count": 2,
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            "analytics.income_by_account_category",
+            lambda month: [
+                {
+                    "account_id": "a2",
+                    "account_name": "Chase Checking",
+                    "account_mask": "*1234",
+                    "category": "INCOME_WAGES",
+                    "total_income": 5100.0,
+                    "txn_count": 1,
+                }
+            ],
+        )
+
+        resp = client.get("/reports?month=2026-05")
+
+        assert resp.status_code == 200
+        body = resp.data.decode()
+        # portrait wrapper + rotation, applied via CSS only
+        assert "class=\"sankey-wrap\"" in body
+        assert "transform: rotate(90deg)" in body
+        assert "transform-origin: top left" in body
+        assert "@media (max-width: 768px)" in body
+        # the rotation is not a JS re-render path
+        assert "matchMedia" not in body
+        assert "orientation: 'v'" not in body
     @pytest.mark.parametrize(
         "bad_month",
         ["0", "1-1-1", "2026-13", "abcdefgh", "../../etc/passwd", "2026-05%00"],

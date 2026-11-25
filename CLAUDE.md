@@ -33,7 +33,7 @@ Data flow: `main.py` (CLI) and `web_server.py` (dashboard) → `sync.py` / `anal
 
 **`analytics.py`** — all read queries + rule engine + transfer detection. See "Domain rules" below.
 
-**`web_server.py`** — Flask dashboard: `/` (dashboard), `/accounts` (labels, sync now, link, remove item), `/transactions` (search, month/category/account filters, saved views, inline category edit preserving filters, CSV export; `?month=` must parse as YYYY-MM and `?limit=` is capped at `MAX_ROWS_PER_PAGE` (1000) — both pages share that parsing via `web_server._list_filters()` so the export always mirrors the displayed page)), `/transactions/<id>` (note, tags, category), `/reports` (Sankey via Plotly, bar charts, budgets), `/rules` (search + pagination).
+**`web_server.py`** — Flask dashboard: `/` (dashboard), `/accounts` (labels, sync now, link, remove item), `/transactions` (search, month/category/account filters, saved views, inline category edit preserving filters, CSV export; `?month=` must parse as YYYY-MM and `?limit=` is capped at `MAX_ROWS_PER_PAGE` (1000) — both pages share that parsing via `web_server._list_filters()` so the export always mirrors the displayed page)), `/transactions/<id>` (note, tags, category), `/reports` (Sankey via Plotly, bar charts, budgets; on screens narrower than 768px (the hamburger-nav breakpoint) the whole Sankey — bars, links, labels and numbers — is rotated 90deg via CSS so it reads when the phone is tilted (`.sankey-wrap`/`#sankey-chart`, `templates/base.html`); desktop sizing is unchanged), `/rules` (search + pagination).
 
 **`export.py`** — CSV in Rocket Money's exact export format (re-importable into RM); header row in `CSV_HEADER` must not change.
 
