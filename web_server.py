@@ -33,7 +33,10 @@ def _get_plaid() -> PlaidClient:
     return _plaid
 
 
-app = Flask(__name__)
+# static_url_path="/" serves static/ at the site root, so the generated icon
+# URLs (/favicon-32x32.png, /site.webmanifest, ...) work exactly as the
+# <link> tags in base.html write them. The explicit routes still win.
+app = Flask(__name__, static_folder="static", static_url_path="/")
 app.secret_key = os.urandom(24)
 
 _log = logging.getLogger(__name__)

@@ -1922,3 +1922,61 @@ class TestTransactionsExport:
         body = resp.get_data(as_text=True)
         assert body.endswith("\n")
         assert body.count("\n") == 1
+
+
+class TestFavicon:
+    """The favicon files from favicon_io.zip are served at the site root and the
+    pages link to them."""
+
+    # All of them must serve, not just the four <link> tags: browsers still
+    # fetch /favicon.ico on their own, and the manifest points at the two
+    # android icons.
+    ICON_PATHS = [
+        "/apple-touch-icon.png",
+        "/favicon-32x32.png",
+        "/favicon-16x16.png",
+        "/favicon.ico",
+        "/android-chrome-192x192.png",
+        "/android-chrome-512x512.png",
+        "/site.webmanifest",
+    ]
+
+    @pytest.mark.parametrize("path", ICON_PATHS)
+    def test_serves_icon_files(self, path, client):
+        resp = client.get(path)
+
+        assert resp.status_code == 200
+        assert len(resp.data) > 0
+
+    def test_manifest_is_valid_and_named(self, client):
+        import json
+
+        resp = client.get("/site.webmanifest")
+
+        manifest = json.loads(resp.get_data(as_text=True))
+        assert manifest["name"] == "Rock Money"
+        assert manifest["short_name"] == "Rock Money"
+        assert all(i["src"].startswith("/") for i in manifest["icons"])
+
+    def test_pages_link_to_icons(self, client, monkeypatch):
+        monkeypatch.setattr("analytics.get_accounts", lambda: [])
+        monkeypatch.setattr("analytics.get_transactions", lambda **kw: [])
+        monkeypatch.setattr("analytics.spend_by_category", lambda month: [])
+        monkeypatch.setattr("analytics.income_by_category", lambda month: [])
+        monkeypatch.setattr("analytics.monthly_summary", lambda months=6: [])
+
+        resp = client.get("/")
+
+        assert (
+            b'<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">'
+            in resp.data
+        )
+        assert (
+            b'<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">'
+            in resp.data
+        )
+        assert (
+            b'<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">'
+            in resp.data
+        )
+        assert b'<link rel="manifest" href="/site.webmanifest">' in resp.data
