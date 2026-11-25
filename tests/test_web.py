@@ -1980,3 +1980,16 @@ class TestFavicon:
             in resp.data
         )
         assert b'<link rel="manifest" href="/site.webmanifest">' in resp.data
+
+    def test_pages_show_logo(self, client, monkeypatch):
+        """The logo sits left of the 'rock money' brand on every page, served
+        from the static folder at the site root."""
+        monkeypatch.setattr("analytics.get_accounts", lambda: [])
+        monkeypatch.setattr("analytics.get_transactions", lambda **kw: [])
+        monkeypatch.setattr("analytics.spend_by_category", lambda month: [])
+        monkeypatch.setattr("analytics.income_by_category", lambda month: [])
+        monkeypatch.setattr("analytics.monthly_summary", lambda months=6: [])
+
+        resp = client.get("/")
+
+        assert b'<img class="brand-logo" src="/android-chrome-192x192.png"' in resp.data

@@ -31,7 +31,8 @@
     nav { background: var(--card); border-bottom: 1px solid var(--border);
           height: 52px; display: flex; align-items: center; padding: 0 20px;
           position: relative; z-index: 200; }
-    .brand { font-weight: 700; font-size: 15px; margin-right: 20px; flex-shrink: 0; }
+    .brand { font-weight: 700; font-size: 15px; margin-right: 20px; flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+    .brand-logo { width: 32px; height: 32px; border-radius: 6px; }
     .nav-toggle { display: none; background: none; border: none; cursor: pointer;
                   font-size: 22px; line-height: 1; padding: 6px 8px; color: var(--text);
                   margin-left: auto; flex-shrink: 0; }
@@ -228,7 +229,7 @@
 </head>
 <body>
   <nav id="site-nav">
-    <a class="brand" href="/">rock money</a>
+    <a class="brand" href="/" title="rock money"><img class="brand-logo" src="/android-chrome-192x192.png" alt="" width="32" height="32">rock money</a>
     <button class="nav-toggle"
             onclick="document.getElementById('site-nav').classList.toggle('open')"
             aria-label="Toggle menu">&#9776;</button>

@@ -1,5 +1,7 @@
 # rock-money
 
+![Rock Money logo](static/android-chrome-192x192.png)
+
 A self-hosted personal finance tracker. Wraps the [Plaid](https://plaid.com)
 API for linking bank accounts and pulling transactions into a local PostgreSQL
 database. The goal is to grow into a full replacement for Rocket Money, Copilot,
