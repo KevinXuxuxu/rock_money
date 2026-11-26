@@ -6,6 +6,8 @@ All functions use the existing db.get_conn() pool and return lists of dicts.
 import logging
 import re
 
+import psycopg2.extras
+
 import db
 
 _log = logging.getLogger(__name__)
@@ -128,8 +130,6 @@ def get_transactions(
     params.append(limit)
 
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
@@ -183,8 +183,6 @@ def get_export_rows(
     params.append(limit)
 
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
             rows = [dict(row) for row in cur.fetchall()]
@@ -234,8 +232,6 @@ def spend_by_category(month: str) -> list[dict]:
         month: YYYY-MM — e.g. '2026-06'
     """
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -277,8 +273,6 @@ def income_by_category(month: str) -> list[dict]:
         month: YYYY-MM — e.g. '2026-06'
     """
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -319,8 +313,6 @@ def income_by_account_category(month: str) -> list[dict]:
         month: YYYY-MM — e.g. '2026-06'
     """
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -381,8 +373,6 @@ def spend_by_category_account(month: str) -> list[dict]:
         month: YYYY-MM — e.g. '2026-06'
     """
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -442,8 +432,6 @@ def monthly_summary(months: int = 12) -> list[dict]:
         months: number of calendar months to look back (default 12)
     """
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -504,8 +492,6 @@ def get_categories() -> list[str]:
 def get_transaction_detail(transaction_id: str) -> dict | None:
     """Return a single transaction with note and tags, or None if not found."""
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -578,8 +564,6 @@ def budget_alert(month: str, threshold: float = 80.0) -> list[dict]:
 def get_accounts() -> list[dict]:
     """Return all accounts with transaction counts."""
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -650,8 +634,6 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
         {txn_id_a, txn_id_b, transfer_id, amount, account_a, account_b}
     """
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
@@ -748,8 +730,6 @@ def apply_rules(dry_run: bool = False) -> list[dict]:
         return []
 
     with db.get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             if dry_run:
                 # Match against all transactions so the user can test the rule.

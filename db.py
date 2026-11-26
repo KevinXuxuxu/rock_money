@@ -343,8 +343,6 @@ def list_category_rules(
         query += " LIMIT %s OFFSET %s"
         params += [limit, offset or 0]
     with get_conn() as conn:
-        import psycopg2.extras
-
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(query, params)
             return [dict(row) for row in cur.fetchall()]

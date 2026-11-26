@@ -307,8 +307,6 @@ def set_account_label_web(account_id):
 
 @app.get("/api/link-token")
 def api_link_token():
-    import os
-
     try:
         redirect_uri = os.environ.get("PLAID_REDIRECT_URI") or None
         token = _get_plaid().create_link_token(redirect_uri=redirect_uri)
