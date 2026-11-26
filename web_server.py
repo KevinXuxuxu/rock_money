@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
 from flask import (
     Flask,
@@ -87,6 +88,25 @@ def fmt_amount_filter(v):
     f = float(v)
     s = f"${abs(f):,.2f}"
     return f"-{s}" if f < 0 else s
+
+
+def _local_now() -> datetime:
+    """Now in the configured timezone.
+
+    APP_TIMEZONE (IANA name, e.g. America/Chicago) sets the zone the dashboard
+    uses for 'this month' and for filenames. Unset or unreadable, the server
+    local clock is used — the dashboard shows the wrong month near month-end
+    for anyone east of UTC when the server clock is UTC-based.
+    """
+    tz_name = os.environ.get("APP_TIMEZONE")
+    if tz_name:
+        try:
+            return datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            _log.warning(
+                "APP_TIMEZONE=%r unreadable — falling back to server time", tz_name
+            )
+    return datetime.now()
 
 
 def _humanize_since(when) -> str:
@@ -188,7 +208,7 @@ def _list_filters() -> dict:
 
 @app.get("/")
 def dashboard():
-    month = datetime.now().strftime("%Y-%m")
+    month = _local_now().strftime("%Y-%m")
     accounts = analytics.get_accounts()
     recent_txns = analytics.get_transactions(limit=10)
     spend = analytics.spend_by_category(month)
@@ -381,7 +401,7 @@ def transactions_export():
     rows = analytics.get_export_rows(**parsed)
     csv_text = export.render_transactions_csv(rows)
     # `month` is validated, so it can never reach the download filename as junk.
-    suffix = parsed["month"] or datetime.now().strftime("%Y-%m-%d")
+    suffix = parsed["month"] or _local_now().strftime("%Y-%m-%d")
     filename = f"transactions_{suffix}.csv"
     return Response(
         csv_text,
@@ -397,7 +417,7 @@ def search_page():
 
 @app.get("/reports")
 def reports_page():
-    this_month = datetime.now().strftime("%Y-%m")
+    this_month = _local_now().strftime("%Y-%m")
     month = _parse_month(request.args.get("month")) or this_month
     # Clamp to the current month — there's no data in the future.
     if month > this_month:

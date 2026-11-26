@@ -2124,3 +2124,84 @@ class TestSecretKey:
         monkeypatch.setattr(web_server, "_SECRET_FILE", path)
 
         assert web_server._load_secret_key() == "pre-existing-key"
+
+
+class TestLocalNow:
+    """'This month' labels come from the configured timezone, not the server
+    clock — otherwise dashboards show the wrong month near month-end."""
+
+    def test_aware_now_in_configured_timezone(self, monkeypatch):
+        monkeypatch.setenv("APP_TIMEZONE", "America/Chicago")
+        now = web_server._local_now()
+        assert now.tzinfo is not None
+        assert now.utcoffset() is not None
+
+    def test_falls_back_to_server_time_on_bad_timezone(self, monkeypatch):
+        monkeypatch.setenv("APP_TIMEZONE", "Not/A/Real/Zone")
+        now = web_server._local_now()
+        assert now.tzinfo is None
+
+    def test_falls_back_when_unset(self, monkeypatch):
+        monkeypatch.delenv("APP_TIMEZONE", raising=False)
+        now = web_server._local_now()
+        assert now.tzinfo is None
+
+    @patch("analytics.income_by_category")
+    @patch("analytics.monthly_summary")
+    @patch("analytics.spend_by_category")
+    @patch("analytics.get_transactions")
+    @patch("analytics.get_accounts")
+    def test_dashboard_month_uses_local_now(
+        self,
+        mock_accts,
+        mock_txns,
+        mock_spend,
+        mock_summary,
+        mock_income,
+        client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(web_server, "_local_now", lambda: datetime(2026, 2, 15))
+        mock_accts.return_value = []
+        mock_txns.return_value = []
+        mock_spend.return_value = []
+        mock_summary.return_value = []
+        mock_income.return_value = []
+
+        resp = client.get("/")
+
+        assert b"2026-02" in resp.data
+
+
+class TestReportsPageTimezone:
+    """The default report month is 'this month' in the configured timezone."""
+
+    @patch("analytics.spend_by_category")
+    @patch("analytics.income_by_category")
+    @patch("analytics.monthly_summary")
+    @patch("analytics.budget_status")
+    @patch("analytics.income_by_account_category")
+    @patch("analytics.spend_by_category_account")
+    def test_default_month_is_local_now(
+        self,
+        mock_accounts,
+        mock_income_acct,
+        mock_budgets,
+        mock_summary,
+        mock_income,
+        mock_spend,
+        client,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(web_server, "_local_now", lambda: datetime(2026, 3, 20))
+        mock_summary.return_value = []
+        mock_spend.return_value = []
+        mock_income.return_value = []
+        mock_budgets.return_value = []
+        mock_income_acct.return_value = []
+        mock_accounts.return_value = []
+
+        resp = client.get("/reports")
+
+        assert resp.status_code == 200
+        assert b"View all March 2026 transactions" in resp.data
