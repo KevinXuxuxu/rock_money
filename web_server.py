@@ -3,6 +3,7 @@
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlencode
 
 from flask import (
@@ -23,6 +24,8 @@ import export
 import sync as sync_mod
 from plaid_client import PlaidClient
 
+_log = logging.getLogger(__name__)
+
 _plaid: PlaidClient | None = None
 
 
@@ -36,10 +39,37 @@ def _get_plaid() -> PlaidClient:
 # static_url_path="/" serves static/ at the site root, so the generated icon
 # URLs (/favicon-32x32.png, /site.webmanifest, ...) work exactly as the
 # <link> tags in base.html write them. The explicit routes still win.
-app = Flask(__name__, static_folder="static", static_url_path="/")
-app.secret_key = os.urandom(24)
+_SECRET_FILE = Path(__file__).resolve().parent / ".secret_key"
 
-_log = logging.getLogger(__name__)
+
+def _load_secret_key() -> str:
+    """A stable secret key shared by every worker process and restart.
+
+    The dashboard runs under gunicorn with multiple workers, and session
+    cookies/flash messages are signed with this key: a fresh os.urandom key per
+    process makes them unreadable on the other workers (and flashes silently
+    vanish after a redirect). Read SECRET_KEY from the environment first;
+    otherwise persist a random key to a local file the workers share.
+    """
+    env = os.environ.get("SECRET_KEY")
+    if env:
+        return env
+    if _SECRET_FILE.exists():
+        key = _SECRET_FILE.read_text().strip()
+        if key:
+            return key
+    key = os.urandom(32).hex()
+    try:
+        _SECRET_FILE.write_text(key)
+        _SECRET_FILE.chmod(0o600)
+    except OSError as exc:
+        # Read-only filesystem: fall back to the random key rather than crash.
+        _log.warning("cannot persist secret key to %s: %s", _SECRET_FILE, exc)
+    return key
+
+
+app = Flask(__name__, static_folder="static", static_url_path="/")
+app.secret_key = _load_secret_key()
 
 
 @app.template_filter("money")

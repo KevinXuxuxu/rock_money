@@ -2046,3 +2046,41 @@ class TestFavicon:
         resp = client.get("/")
 
         assert b'<img class="brand-logo" src="/android-chrome-192x192.png"' in resp.data
+
+
+class TestSecretKey:
+    """The dashboard runs under gunicorn with multiple workers — the secret key
+    must be identical in every process, or sessions/flash messages stop working
+    after a redirect."""
+
+    def test_env_secret_key_wins(self, monkeypatch):
+        monkeypatch.setenv("SECRET_KEY", "stable-env-key")
+        assert web_server._load_secret_key() == "stable-env-key"
+
+    def test_key_is_persisted_and_stable_across_calls(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.setattr(web_server, "_SECRET_FILE", tmp_path / ".secret_key")
+
+        first = web_server._load_secret_key()
+        second = web_server._load_secret_key()
+
+        assert first == second
+        assert len(first) >= 32
+        assert (tmp_path / ".secret_key").read_text().strip() == first
+
+    def test_persisted_file_has_0600_perms(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.setattr(web_server, "_SECRET_FILE", tmp_path / ".secret_key")
+
+        web_server._load_secret_key()
+
+        perms = (tmp_path / ".secret_key").stat().st_mode & 0o777
+        assert perms == 0o600
+
+    def test_existing_key_file_is_used_as_is(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        path = tmp_path / ".secret_key"
+        path.write_text("pre-existing-key\n")
+        monkeypatch.setattr(web_server, "_SECRET_FILE", path)
+
+        assert web_server._load_secret_key() == "pre-existing-key"

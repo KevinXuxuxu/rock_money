@@ -3,11 +3,16 @@ Shared test fixtures. Mock the database at the db.py boundary so tests
 never touch PostgreSQL.
 """
 
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import db
+
+# Test runs never read the repo's .secret_key or write one — web_server
+# reads this at import time.
+os.environ.setdefault("SECRET_KEY", "test-secret-key")
 
 
 @pytest.fixture(autouse=True)

@@ -13,3 +13,5 @@ wheels/
 .claude
 
 *.csv
+# Stable app secret key (generated on first run, never committed)
+.secret_key
