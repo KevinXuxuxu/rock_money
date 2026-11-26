@@ -1055,7 +1055,9 @@ class TestReportsPage:
 
         monkeypatch.setattr(
             "analytics.spend_by_category",
-            lambda month: [{"category": "TRAVEL", "total_spend": 5100.0, "txn_count": 2}],
+            lambda month: [
+                {"category": "TRAVEL", "total_spend": 5100.0, "txn_count": 2}
+            ],
         )
         monkeypatch.setattr(
             "analytics.spend_by_category_account",
@@ -1090,13 +1092,14 @@ class TestReportsPage:
         assert resp.status_code == 200
         body = resp.data.decode()
         # portrait wrapper + rotation, applied via CSS only
-        assert "class=\"sankey-wrap\"" in body
+        assert 'class="sankey-wrap"' in body
         assert "transform: rotate(90deg)" in body
         assert "transform-origin: top left" in body
         assert "@media (max-width: 768px)" in body
         # the rotation is not a JS re-render path
         assert "matchMedia" not in body
         assert "orientation: 'v'" not in body
+
     @pytest.mark.parametrize(
         "bad_month",
         ["0", "1-1-1", "2026-13", "abcdefgh", "../../etc/passwd", "2026-05%00"],
