@@ -32,7 +32,20 @@ def cmd_sync(args):
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         level=logging.WARNING if args.quiet else logging.INFO,
     )
-    sync.sync_all()
+    result = sync.sync_all()
+    if not result["ran"]:
+        print("Sync skipped: another sync is already running.")
+        return
+    n_failed = len(result["failed_items"])
+    print(
+        f"Synced: +{result['added']} added, ~{result['modified']} modified,"
+        f" -{result['removed']} removed"
+    )
+    if n_failed:
+        print(
+            f"Sync failed for {n_failed} item(s): {', '.join(result['failed_items'])}"
+        )
+        raise SystemExit(1)
 
 
 def cmd_list_items(args):

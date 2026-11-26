@@ -285,7 +285,14 @@ class TestAccountsPage:
 class TestSyncAccounts:
     @patch("sync.sync_all")
     def test_redirects_on_success(self, mock_sync, client):
-        mock_sync.return_value = True
+        mock_sync.return_value = {
+            "ran": True,
+            "items_total": 1,
+            "failed_items": [],
+            "added": 1,
+            "modified": 0,
+            "removed": 0,
+        }
         resp = client.post("/accounts/sync")
         assert resp.status_code == 302
         assert "/accounts" in resp.headers["Location"]
@@ -294,7 +301,14 @@ class TestSyncAccounts:
     @patch("analytics.get_accounts")
     @patch("sync.sync_all")
     def test_flashes_success(self, mock_sync, mock_accts, client):
-        mock_sync.return_value = True
+        mock_sync.return_value = {
+            "ran": True,
+            "items_total": 1,
+            "failed_items": [],
+            "added": 1,
+            "modified": 0,
+            "removed": 0,
+        }
         mock_accts.return_value = []
         resp = client.post("/accounts/sync", follow_redirects=True)
         assert b"Sync complete" in resp.data
@@ -311,13 +325,39 @@ class TestSyncAccounts:
     @patch("analytics.get_accounts")
     @patch("sync.sync_all")
     def test_deferred_to_running_sync_says_so(self, mock_sync, mock_accts, client):
-        """sync_all returns False when it skipped the run; the page must not
+        """sync_all reports ran=False when the lock was busy; the page must not
         claim the sync completed."""
-        mock_sync.return_value = False
+        mock_sync.return_value = {
+            "ran": False,
+            "items_total": 0,
+            "failed_items": [],
+            "added": 0,
+            "modified": 0,
+            "removed": 0,
+        }
         mock_accts.return_value = []
         resp = client.post("/accounts/sync", follow_redirects=True)
         assert b"Sync complete" not in resp.data
         assert b"already running" in resp.data
+
+    @patch("analytics.get_accounts")
+    @patch("sync.sync_all")
+    def test_flashes_failed_items(self, mock_sync, mock_accts, client):
+        """Partial failures must be visible, not reported as a complete sync."""
+        mock_sync.return_value = {
+            "ran": True,
+            "items_total": 2,
+            "failed_items": ["Chase Checking", "BofA"],
+            "added": 1,
+            "modified": 0,
+            "removed": 0,
+        }
+        mock_accts.return_value = []
+        resp = client.post("/accounts/sync", follow_redirects=True)
+        assert b"Sync complete" not in resp.data
+        assert b"Sync failed for 2 item(s)" in resp.data
+        assert b"Chase Checking" in resp.data
+        assert b"BofA" in resp.data
 
 
 class TestApiLinkToken:

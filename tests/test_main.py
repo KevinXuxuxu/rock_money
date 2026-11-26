@@ -1,6 +1,9 @@
 """Smoke tests for CLI command handlers — all analytics calls are mocked."""
 
+from argparse import Namespace
 from unittest.mock import patch
+
+import pytest
 
 import main
 
@@ -599,3 +602,55 @@ class TestCategoryCommands:
         main.cmd_rule_apply(Namespace(dry_run=False))
         out = capsys.readouterr().out
         assert "No matching" in out
+
+
+class TestSyncCommand:
+    """cmd_sync must report what actually happened, not claim success."""
+
+    def _args(self):
+        return Namespace(quiet=True)
+
+    @patch("sync.sync_all")
+    def test_skipped_when_lock_busy(self, mock_sync, capsys):
+        mock_sync.return_value = {
+            "ran": False,
+            "items_total": 0,
+            "failed_items": [],
+            "added": 0,
+            "modified": 0,
+            "removed": 0,
+        }
+        main.cmd_sync(self._args())
+        out = capsys.readouterr().out
+        assert "already running" in out
+
+    @patch("sync.sync_all")
+    def test_success_prints_totals(self, mock_sync, capsys):
+        mock_sync.return_value = {
+            "ran": True,
+            "items_total": 1,
+            "failed_items": [],
+            "added": 3,
+            "modified": 2,
+            "removed": 1,
+        }
+        main.cmd_sync(self._args())
+        out = capsys.readouterr().out
+        assert "+3 added" in out
+        assert "-1 removed" in out
+
+    @patch("sync.sync_all")
+    def test_failed_items_exit_nonzero(self, mock_sync, capsys):
+        mock_sync.return_value = {
+            "ran": True,
+            "items_total": 2,
+            "failed_items": ["Chase", "BofA"],
+            "added": 1,
+            "modified": 0,
+            "removed": 0,
+        }
+        with pytest.raises(SystemExit) as exc:
+            main.cmd_sync(self._args())
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "Chase" in out and "BofA" in out

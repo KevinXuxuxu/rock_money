@@ -155,7 +155,7 @@ class TestSyncLock:
 
     def test_runs_and_returns_true_when_the_lock_is_free(self):
         with patch("db.list_items", return_value=[]) as mock_items:
-            assert sync.sync_all() is True
+            assert sync.sync_all()["ran"] is True
 
         mock_items.assert_called_once_with()
 
@@ -164,7 +164,7 @@ class TestSyncLock:
         fcntl.flock(held, fcntl.LOCK_EX)
 
         with patch("db.list_items") as mock_items, patch("sync.sync_item") as item:
-            assert sync.sync_all() is False
+            assert sync.sync_all()["ran"] is False
 
         item.assert_not_called()
         mock_items.assert_not_called()
@@ -173,8 +173,8 @@ class TestSyncLock:
     def test_lock_is_released_after_a_run(self):
         """A finished sync must not block the next one."""
         with patch("db.list_items", return_value=[]) as mock_items:
-            assert sync.sync_all() is True
-            assert sync.sync_all() is True
+            assert sync.sync_all()["ran"] is True
+            assert sync.sync_all()["ran"] is True
 
         assert mock_items.call_count == 2
 
@@ -184,7 +184,7 @@ class TestSyncLock:
         with patch("db.list_items", side_effect=[RuntimeError("db gone"), []]):
             with pytest.raises(RuntimeError):
                 sync.sync_all()
-            assert sync.sync_all() is True
+            assert sync.sync_all()["ran"] is True
 
     def test_error_inside_an_item_does_not_stop_the_run(self, mock_db):
         """Per-item failures are caught inside the sync, which still counts as
@@ -196,4 +196,86 @@ class TestSyncLock:
             patch("db.list_category_rules", return_value=[]),
             patch("analytics.detect_internal_transfers", return_value=[]),
         ):
-            assert sync.sync_all() is True
+            assert sync.sync_all()["ran"] is True
+
+
+class TestSyncFailureReporting:
+    """A failing item must be reported — earlier failures were log-only and a
+    fully-failed sync still flashed 'Sync complete'."""
+
+    @patch("analytics.detect_internal_transfers")
+    @patch("analytics.apply_rules")
+    @patch("sync.sync_item")
+    @patch("db.list_category_rules")
+    @patch("db.list_items")
+    def test_failed_item_is_reported_and_rest_complete(
+        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_detect, mock_db
+    ):
+        mock_items.return_value = [
+            {"item_id": "item_1", "institution_name": "Chase"},
+            {"item_id": "item_2", "institution_name": "BofA"},
+        ]
+        mock_rules.return_value = []
+        mock_detect.return_value = []
+
+        def fails_for_chase(item_id, access_token):
+            if item_id == "item_1":
+                raise RuntimeError("timeout")
+            return {"added": 2, "modified": 1, "removed": 0}
+
+        mock_sync_item.side_effect = fails_for_chase
+        # Mock get_conn for the access_token SELECT inside _sync_all.
+        mock_db.fetchone.side_effect = [
+            ("token-chase",),
+            ("token-bofa",),
+        ]
+
+        result = sync.sync_all()
+
+        assert result["ran"] is True
+        assert result["items_total"] == 2
+        assert result["failed_items"] == ["Chase"]
+        assert result["added"] == 2
+        assert result["modified"] == 1
+
+    @patch("analytics.detect_internal_transfers")
+    @patch("analytics.apply_rules")
+    @patch("sync.sync_item")
+    @patch("db.list_category_rules")
+    @patch("db.list_items")
+    def test_all_items_fail_and_all_are_reported(
+        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_detect, mock_db
+    ):
+        mock_items.return_value = [
+            {"item_id": "item_1", "institution_name": "Chase"},
+            {"item_id": "item_2", "institution_name": "BofA"},
+        ]
+        mock_rules.return_value = []
+        mock_detect.return_value = []
+        mock_sync_item.side_effect = RuntimeError("down")
+        mock_db.fetchone.side_effect = [("t1",), ("t2",)]
+
+        result = sync.sync_all()
+
+        assert result["ran"] is True
+        assert result["failed_items"] == ["Chase", "BofA"]
+        assert result["added"] == 0
+
+    @patch("analytics.detect_internal_transfers")
+    @patch("analytics.apply_rules")
+    @patch("sync.sync_item")
+    @patch("db.list_category_rules")
+    @patch("db.list_items")
+    def test_missing_access_token_is_reported_not_silently_skipped(
+        self, mock_items, mock_rules, mock_sync_item, mock_apply, mock_detect, mock_db
+    ):
+        mock_items.return_value = [{"item_id": "item_1", "institution_name": "Chase"}]
+        mock_rules.return_value = []
+        mock_detect.return_value = []
+        mock_db.fetchone.return_value = None
+
+        result = sync.sync_all()
+
+        assert result["ran"] is True
+        assert result["failed_items"] == ["Chase"]
+        mock_sync_item.assert_not_called()

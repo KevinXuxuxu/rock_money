@@ -75,31 +75,53 @@ def sync_item(item_id: str, access_token: str) -> dict:
     return total
 
 
-def sync_all() -> bool:
+def sync_all() -> dict:
     """Sync every linked item, unless another sync is still running.
 
-    Returns False when the run was skipped, so the caller can report that
-    instead of claiming a sync that never happened.
+    Returns a summary dict:
+      ran: False when the lock was busy (nothing was synced)
+      items_total: number of items the run attempted
+      failed_items: names of items whose sync raised (empty on full success)
+      added/modified/removed: totals across all items
     """
     lock = _try_sync_lock()
     if lock is None:
         _log.warning("another sync is still running — skipping this one")
-        return False
+        return {
+            "ran": False,
+            "items_total": 0,
+            "failed_items": [],
+            "added": 0,
+            "modified": 0,
+            "removed": 0,
+        }
     try:
-        _sync_all()
+        return _sync_all()
     finally:
         lock.close()
-    return True
 
 
-def _sync_all() -> None:
-    """Syncs all linked items stored in the database."""
+def _sync_all() -> dict:
+    """Syncs all linked items stored in the database.
+
+    A failing item is logged and retried on the next sync; it does not stop
+    the other items, but it IS reported in failed_items so the caller can say
+    the sync did not complete.
+    """
     items = db.list_items()
+    summary = {
+        "ran": True,
+        "items_total": len(items),
+        "failed_items": [],
+        "added": 0,
+        "modified": 0,
+        "removed": 0,
+    }
     if not items:
         _log.warning(
             "No linked items found. Run `python main.py link` to connect an account."
         )
-        return
+        return summary
 
     _log.info("Starting sync of %d item(s)", len(items))
     for item in items:
@@ -114,11 +136,16 @@ def _sync_all() -> None:
                 row = cur.fetchone()
         if not row:
             _log.warning("[%s] skipping — access token not found", name)
+            summary["failed_items"].append(name)
             continue
         try:
-            sync_item(item["item_id"], row[0])
+            totals = sync_item(item["item_id"], row[0])
+            summary["added"] += totals["added"]
+            summary["modified"] += totals["modified"]
+            summary["removed"] += totals["removed"]
         except Exception as exc:
             _log.error("[%s] sync failed: %s", name, exc)
+            summary["failed_items"].append(name)
 
     rules = db.list_category_rules()
     if rules:
@@ -135,3 +162,4 @@ def _sync_all() -> None:
         _log.info("No new transfer pairs found.")
 
     _log.info("Sync complete.")
+    return summary
