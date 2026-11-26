@@ -734,28 +734,6 @@ def detect_internal_transfers(dry_run: bool = False) -> list[dict]:
     return pairs
 
 
-# ── Category resolution ──────────────────────────────────────────────────────
-
-
-def effective_category(transaction_id: str) -> str | None:
-    """Return the user's override category, or None if not set.
-    Caller should fall back to Plaid's personal_finance_category, then 'Uncategorized'.
-    """
-    return db.get_category_override(transaction_id)
-
-
-def resolve_category(transaction: dict) -> str:
-    """
-    Resolve the best category for a transaction dict.
-    Priority: user override > rule match > Plaid category > 'Uncategorized'.
-    """
-    txn_id = transaction["transaction_id"]
-    override = effective_category(txn_id)
-    if override:
-        return override
-    return transaction.get("personal_finance_category") or "Uncategorized"
-
-
 def apply_rules(dry_run: bool = False) -> list[dict]:
     """
     Apply all category rules to transactions.

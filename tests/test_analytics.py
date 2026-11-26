@@ -550,14 +550,6 @@ class TestCategoryOverrideConsistency:
         sql = mock_db.execute.call_args[0][0]
         assert "NOT EXISTS" in sql
 
-    def test_resolve_category_manual_override_wins_over_plaid(self):
-        """Manual override takes priority — regardless of what Plaid returned."""
-        txn = make_txn(transaction_id="txn_1", personal_finance_category="TRANSFER_OUT")
-        with patch("analytics.effective_category", return_value="LOAN_PAYMENT"):
-            result = analytics.resolve_category(txn)
-        assert result == "LOAN_PAYMENT"
-        assert result != "TRANSFER_OUT"
-
 
 class TestSpendByCategoryAccount:
     """spend_by_category_account() — Sankey categories→accounts stage."""
@@ -968,31 +960,6 @@ class TestGetTransactionDetail:
         assert result["transaction_id"] == "txn_1"
         assert result["tags"] == ["groceries", "weekly"]
         assert result["note"] == "weekly shop"
-
-
-class TestResolveCategory:
-    """Phase 3: resolve_category()"""
-
-    def test_returns_override_when_set(self):
-        txn = make_txn(transaction_id="txn_1", personal_finance_category="GROCERIES")
-        with patch("analytics.effective_category", return_value="My Custom"):
-            result = analytics.resolve_category(txn)
-        assert result == "My Custom"
-
-    def test_falls_back_to_plaid(self):
-        txn = make_txn(
-            transaction_id="txn_2", personal_finance_category="TRANSPORTATION"
-        )
-        with patch("analytics.effective_category", return_value=None):
-            result = analytics.resolve_category(txn)
-        assert result == "TRANSPORTATION"
-
-    def test_falls_back_to_uncategorized(self):
-        txn = make_txn(transaction_id="txn_3")
-        txn["personal_finance_category"] = None
-        with patch("analytics.effective_category", return_value=None):
-            result = analytics.resolve_category(txn)
-        assert result == "Uncategorized"
 
 
 # ── apply_rules ───────────────────────────────────────────────────────────────
